@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fr330hfr33 Editor</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; background: #14110f; color: #f3e8cf; }
+  main { width: min(620px, calc(100% - 32px)); margin: 40px auto; }
+  h1 { color: #ffb000; letter-spacing: .04em; margin-bottom: 6px; }
+  .panel { background: #211b17; border: 1px solid #5c4630; border-radius: 14px;
+    padding: 22px; display: grid; gap: 18px; }
+  label { display: grid; gap: 7px; font-weight: 650; }
+  select, input, button { font: inherit; }
+  select, input[type="number"] { background: #100e0c; color: #fff3d5;
+    border: 1px solid #725638; border-radius: 7px; padding: 10px; }
+  input[type="range"] { accent-color: #ffb000; }
+  button { border: 0; border-radius: 8px; padding: 12px 16px; cursor: pointer;
+    background: #ffb000; color: #1b1307; font-weight: 800; }
+  button.secondary { background: #493a2b; color: #fff3d5; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .hint, #status { color: #cbb99e; line-height: 1.45; }
+  output { color: #ffca58; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fr330hfr33</h1>
+  <p class="hint">Use a USB-C data cable. Close Serial Monitor and other MIDI
+  apps first. Chrome or Edge is required; iOS is not supported.</p>
+  <section class="panel">
+    <label>Scale
+      <select id="scale">
+        <option value="0">Major pentatonic</option>
+        <option value="1">Minor pentatonic</option>
+        <option value="2">Major</option>
+        <option value="3">Chromatic</option>
+      </select>
+    </label>
+    <label>Accent probability: <output id="accentOut">32%</output>
+      <input id="accent" type="range" min="0" max="100" value="32">
+    </label>
+    <label>Sequencer range
+      <select id="range">
+        <option value="1">1 octave</option>
+        <option value="2" selected>2 octaves</option>
+        <option value="3">3 octaves</option>
+        <option value="4">4 octaves</option>
+      </select>
+    </label>
+    <label>Internal tempo
+      <input id="tempo" type="number" min="30" max="240" value="120">
+    </label>
+    <div class="actions">
+      <button id="connect" class="secondary">Connect MIDI</button>
+      <button id="apply">Apply</button>
+    </div>
+    <div id="status">Not connected. Choose “Fr330hfr33” in the browser dialog.</div>
+  </section>
+</main>
+<script>
+let outputPort = null;
+const $ = id => document.getElementById(id);
+$("accent").addEventListener("input", () =>
+  $("accentOut").value = `${$("accent").value}%`);
+
+$("connect").addEventListener("click", async () => {
+  try {
+    const access = await navigator.requestMIDIAccess({sysex: true});
+    const outputs = [...access.outputs.values()];
+    outputPort = outputs.find(p => /Fr330hfr33/i.test(p.name)) || outputs[0];
+    $("status").textContent = outputPort
+      ? `Connected to ${outputPort.name}.`
+      : "No MIDI output found. Check the cable and reset the card.";
+  } catch (error) {
+    $("status").textContent = `Connection failed: ${error.message}`;
+  }
+});
+
+$("apply").addEventListener("click", () => {
+  if (!outputPort) {
+    $("status").textContent = "Connect MIDI first.";
+    return;
+  }
+  const tempo = Math.max(30, Math.min(240, Number($("tempo").value) || 120));
+  const message = [
+    0xF0, 0x7D, 0x46, 0x33, 0x30, 0x33, 0x01,
+    Number($("scale").value),
+    Number($("accent").value),
+    Number($("range").value),
+    tempo & 0x7F, (tempo >> 7) & 0x7F, 0xF7
+  ];
+  outputPort.send(message);
+  $("status").textContent = "Applied to the running card.";
+});
+</script>
+</body>
+</html>
