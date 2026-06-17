@@ -1,6 +1,168 @@
-Description: Acid bass voice with ladder filter, glide, MIDI, and random sequencer
-Language: C++
-Creator: Adrian Vos with AI-assisted implementation
-Version: 0.1.0
-Status: WIP
-Editor: web_config/Fr330hfr33.html
+id: Fr330hfr33
+title: Fr330hfr33
+release: WIP / 0.1.0
+summary: Acid bass voice with resonant ladder filter, glide, USB MIDI, and random sequencing
+description: Fixed-point acid bass synthesiser with a sawtooth oscillator, four-pole resonant ladder filter, accented AR envelope, pitch glide, USB MIDI device/host operation, and a scale-aware random sequencer.
+panel:
+  controls:
+    main:
+      label: Cutoff
+      description: Sets the ladder filter cutoff frequency.
+      source: curated
+    x:
+      label: Resonance
+      description: >-
+        Sets filter resonance, from a rounded low-pass response to strong
+        resonance and self-oscillation at the upper end.
+      source: curated
+    'y':
+      label: Decay / Glide
+      description: >-
+        Couples envelope decay and pitch glide. Counter-clockwise gives short
+        notes with nearly immediate pitch changes; clockwise gives longer notes
+        and slower slides.
+      source: curated
+    z:
+      label: CV / Sequence / Mute
+      description: >-
+        Up selects external CV/gate or USB MIDI control, middle selects the
+        random sequencer, and holding down mutes the voice and gate output.
+      source: curated
+  inputs:
+    audio_l:
+      label: |-
+        Audio
+        1
+      description: Unused in this build.
+      source: curated
+    audio_r:
+      label: |-
+        Audio
+        2
+      description: Unused in this build.
+      source: curated
+    cv_1:
+      label: |-
+        Pitch
+        CV
+      description: 1V/oct pitch input in switch-up CV/gate mode.
+      source: curated
+    cv_2:
+      label: |-
+        CV
+        2
+      description: Unused in this build.
+      source: curated
+    pulse_1:
+      label: |-
+        Gate
+        In
+      description: External gate input in switch-up CV/gate mode.
+      source: curated
+    pulse_2:
+      label: |-
+        Clock
+        In
+      description: >-
+        External sequencer clock in switch-middle mode. Recent external clocks
+        override the internal clock; the internal clock resumes after timeout.
+      source: curated
+  outputs:
+    audio_out_l:
+      label: |-
+        Filtered
+        Voice
+      description: Enveloped post-filter acid bass voice.
+      source: curated
+    audio_out_r:
+      label: |-
+        Raw
+        Saw
+      description: Raw pre-filter sawtooth oscillator.
+      source: curated
+    cv_out_1:
+      label: |-
+        Pitch
+        Out
+      description: Calibrated 1V/oct output following the currently played pitch.
+      source: curated
+    cv_out_2:
+      label: |-
+        CV
+        2
+      description: Unused in this build.
+      source: curated
+    pulse_out_1:
+      label: |-
+        Gate
+        Out
+      description: Gate output following external, MIDI, or sequencer notes.
+      source: curated
+    pulse_out_2:
+      label: |-
+        Pulse
+        2
+      description: Unused in this build.
+      source: curated
+switch_modes:
+  up: External CV/gate or USB MIDI mode. CV In 1 controls pitch and Pulse In 1 controls gate; an active MIDI note takes priority.
+  middle: Random generative sequencer. Pulse In 2 supplies external clock, otherwise the configured internal tempo is used.
+  down: Momentary performance mute. Audio and gate outputs are silenced while held.
+leds:
+  - "LEDs 1, 3, and 5 indicate switch-up CV/MIDI mode, switch-middle sequencer mode, and switch-down mute mode respectively."
+  - "LED 2 follows the current gate, with a dim idle level."
+  - "LED 4 indicates accented notes."
+  - "LED 6 displays the low four bits of the current MIDI note as brightness."
+notes:
+  - "The Web MIDI editor configures scale, accent probability, sequencer octave span, and internal tempo."
+  - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."
+  - "Editor settings apply to the running session and currently return to defaults after reset."
+  - "MIDI velocity 112-127 produces an accent."
+  - "USB MIDI automatically operates as a device or host according to the Workshop Computer USB power role."
+  - "The firmware runs the RP2040 at 192 MHz, copies the complete binary to RAM, and keeps division, locks, waits, USB work, and software 64-bit multiplication out of the audio callback."
+  - "This is a WIP build awaiting full hardware profiling and musical tuning."
+source:
+  - Fr330hfr33.cpp
+  - Fr330hfr33_LUT.cpp
+  - Fr330hfr33_LUT.h
+  - computercard.h
+  - usb_descriptors.c
+  - tusb_config.h
+  - web_config/Fr330hfr33.html
+  - README.md
+slug: fr330hfr33
+url: /workshopsystem/program-cards/fr330hfr33/
+tags:
+  - id: synth
+    label: Synth
+  - id: midi
+    label: MIDI
+  - id: web-midi
+    label: Web MIDI
+  - id: sequencer
+    label: Sequencer
+  - id: filter
+    label: Filter
+  - id: acid
+    label: Acid
+tag_ids:
+  - synth
+  - midi
+  - web-midi
+  - sequencer
+  - filter
+  - acid
+tag_labels:
+  - Synth
+  - MIDI
+  - Web MIDI
+  - Sequencer
+  - Filter
+  - Acid
+source_file: data/cards/Fr330hfr33.yml
+metadata:
+  creator: Adrian Vos
+  language: Pico SDK
+  version: 0.1.0
+  status: WIP
+  editor_url: web_config/Fr330hfr33.html
