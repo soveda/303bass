@@ -46,7 +46,7 @@ defaults after reboot.
 
 The build intentionally uses:
 
-- `computercard.h` version 0.3.0 from `~/Documents/GitHub/Cizzle`
+- the repository's local `computercard.h`, copied exactly from Cizzle version 0.3.0
 - Cizzle's `usb_midi_host.c` and `usb_midi_host_app_driver.c`
 - Pico SDK from `~/pico-sdk`
 
