@@ -1,8 +1,28 @@
 cmake_minimum_required(VERSION 3.13)
 
-set(PICO_SDK_PATH "/Users/adrianvos/pico-sdk" CACHE PATH "Raspberry Pi Pico SDK")
+if(NOT PICO_SDK_PATH)
+    if(DEFINED ENV{PICO_SDK_PATH})
+        set(PICO_SDK_PATH "$ENV{PICO_SDK_PATH}" CACHE PATH
+            "Raspberry Pi Pico SDK")
+    elseif(EXISTS
+        "${CMAKE_CURRENT_LIST_DIR}/../../pico-sdk/external/pico_sdk_import.cmake")
+        # Convenient when 303bass and pico-sdk are sibling repositories.
+        get_filename_component(PICO_SDK_PATH
+            "${CMAKE_CURRENT_LIST_DIR}/../../pico-sdk" ABSOLUTE)
+        set(PICO_SDK_PATH "${PICO_SDK_PATH}" CACHE PATH
+            "Raspberry Pi Pico SDK")
+    else()
+        message(FATAL_ERROR
+            "Pico SDK not found. Set PICO_SDK_PATH to your pico-sdk checkout.")
+    endif()
+endif()
 
-include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
+if(NOT EXISTS "${PICO_SDK_PATH}/external/pico_sdk_import.cmake")
+    message(FATAL_ERROR
+        "PICO_SDK_PATH does not point to a valid Pico SDK: ${PICO_SDK_PATH}")
+endif()
+
+include("${PICO_SDK_PATH}/external/pico_sdk_import.cmake")
 
 project(Fr330hfr33Experimental C CXX ASM)
 

@@ -3,6 +3,31 @@
 > Experimental waveform/distortion branch. This folder builds independently
 > from the release candidate in the repository root.
 
+## Building the experiment
+
+Prerequisites:
+
+- CMake
+- The Arm GNU toolchain (`arm-none-eabi-gcc`)
+- A Raspberry Pi Pico SDK checkout
+
+Set the standard Pico SDK environment variable, then run the helper from this
+folder:
+
+```sh
+export PICO_SDK_PATH=/path/to/pico-sdk
+./build_experimental.sh
+```
+
+If `pico-sdk` and `303bass` are sibling folders, setting `PICO_SDK_PATH` is
+optional. The helper always starts with a clean
+`experimental_waveform_distortion/build` directory, builds there, moves the
+finished UF2 into `experimental_waveform_distortion/uf2`, and removes the build
+directory afterward—even when a build fails.
+
+The editor/firmware SysEx layout and compatibility notes are maintained in
+[`protocol.md`](protocol.md).
+
 Release-candidate firmware for the Fr330hfr33 Music Thing Modular Workshop
 Computer program card.
 
