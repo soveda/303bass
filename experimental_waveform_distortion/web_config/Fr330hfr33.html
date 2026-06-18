@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fr330hfr33 Editor</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; background: #14110f; color: #f3e8cf; }
+  main { width: min(620px, calc(100% - 32px)); margin: 40px auto; }
+  h1 { color: #ffb000; letter-spacing: .04em; margin-bottom: 6px; }
+  .panel { background: #211b17; border: 1px solid #5c4630; border-radius: 14px;
+    padding: 22px; display: grid; gap: 18px; }
+  label { display: grid; gap: 7px; font-weight: 650; }
+  select, input, button { font: inherit; }
+  select, input[type="number"] { background: #100e0c; color: #fff3d5;
+    border: 1px solid #725638; border-radius: 7px; padding: 10px; }
+  input[type="range"] { accent-color: #ffb000; }
+  .check { grid-template-columns: auto 1fr; align-items: center; }
+  .check input { width: 20px; height: 20px; accent-color: #ffb000; }
+  button { border: 0; border-radius: 8px; padding: 12px 16px; cursor: pointer;
+    background: #ffb000; color: #1b1307; font-weight: 800; }
+  button.secondary { background: #493a2b; color: #fff3d5; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .hint, #status { color: #cbb99e; line-height: 1.45; }
+  output { color: #ffca58; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fr330hfr33</h1>
+  <p class="hint">Use a USB-C data cable. Close Serial Monitor and other MIDI
+  apps first. Chrome or Edge is required; iOS is not supported.</p>
+  <section class="panel">
+    <label>Scale
+      <select id="scale">
+        <option value="0">Major pentatonic</option>
+        <option value="1">Minor pentatonic</option>
+        <option value="2">Ionian (major)</option>
+        <option value="3">Lydian</option>
+        <option value="4">Melodic minor</option>
+        <option value="5">Chromatic</option>
+      </select>
+    </label>
+    <label>Oscillator waveform
+      <select id="waveform">
+        <option value="0">Saw</option>
+        <option value="1">Square</option>
+      </select>
+    </label>
+    <label>Filtered voice distortion
+      <select id="distortion">
+        <option value="0">Off</option>
+        <option value="1">RAT-style hard clipping</option>
+        <option value="2">Tube Screamer-style soft clipping</option>
+      </select>
+    </label>
+    <label>Distortion / overdrive amount:
+      <output id="driveOut">50%</output>
+      <input id="drive" type="range" min="0" max="100" value="50">
+    </label>
+    <label>Distortion tone:
+      <output id="toneOut">50%</output>
+      <input id="tone" type="range" min="0" max="100" value="50">
+    </label>
+    <label>Accent probability: <output id="accentOut">32%</output>
+      <input id="accent" type="range" min="0" max="100" value="32">
+    </label>
+    <label>Sequencer range
+      <select id="range">
+        <option value="1">1 octave</option>
+        <option value="2" selected>2 octaves</option>
+        <option value="3">3 octaves</option>
+        <option value="4">4 octaves</option>
+      </select>
+    </label>
+    <label>Root note
+      <select id="root">
+        <option value="0">C</option>
+        <option value="1">C♯ / D♭</option>
+        <option value="2">D</option>
+        <option value="3">D♯ / E♭</option>
+        <option value="4">E</option>
+        <option value="5">F</option>
+        <option value="6">F♯ / G♭</option>
+        <option value="7">G</option>
+        <option value="8">G♯ / A♭</option>
+        <option value="9">A</option>
+        <option value="10">A♯ / B♭</option>
+        <option value="11">B</option>
+      </select>
+    </label>
+    <label>Base octave
+      <select id="octave">
+        <option value="24">C1 — MIDI 24</option>
+        <option value="36" selected>C2 — MIDI 36</option>
+        <option value="48">C3 — MIDI 48</option>
+        <option value="60">C4 — MIDI 60</option>
+      </select>
+    </label>
+    <label>Gate length: <output id="gateOut">60%</output>
+      <input id="gate" type="range" min="10" max="95" value="60">
+    </label>
+    <label>Glide probability: <output id="glideOut">35%</output>
+      <input id="glide" type="range" min="0" max="100" value="35">
+    </label>
+    <label>MIDI input channel
+      <select id="channel">
+        <option value="0">1</option>
+        <option value="1">2</option>
+        <option value="2">3</option>
+        <option value="3">4</option>
+        <option value="4">5</option>
+        <option value="5">6</option>
+        <option value="6">7</option>
+        <option value="7">8</option>
+        <option value="8">9</option>
+        <option value="9">10</option>
+        <option value="10">11</option>
+        <option value="11">12</option>
+        <option value="12">13</option>
+        <option value="13">14</option>
+        <option value="14">15</option>
+        <option value="15">16</option>
+      </select>
+    </label>
+    <label>Internal tempo
+      <input id="tempo" type="number" min="30" max="240" value="120">
+    </label>
+    <label class="check">
+      <input id="midiClock" type="checkbox">
+      <span>Synchronize sequencer to MIDI clock</span>
+    </label>
+    <div class="actions">
+      <button id="connect" class="secondary">Connect MIDI</button>
+      <button id="apply">Apply</button>
+    </div>
+    <div id="status">Not connected. Choose “Fr330hfr33” in the browser dialog.</div>
+  </section>
+</main>
+<script>
+let outputPort = null;
+const $ = id => document.getElementById(id);
+$("accent").addEventListener("input", () =>
+  $("accentOut").value = `${$("accent").value}%`);
+$("gate").addEventListener("input", () =>
+  $("gateOut").value = `${$("gate").value}%`);
+$("glide").addEventListener("input", () =>
+  $("glideOut").value = `${$("glide").value}%`);
+$("drive").addEventListener("input", () =>
+  $("driveOut").value = `${$("drive").value}%`);
+$("tone").addEventListener("input", () =>
+  $("toneOut").value = `${$("tone").value}%`);
+
+$("connect").addEventListener("click", async () => {
+  try {
+    const access = await navigator.requestMIDIAccess({sysex: true});
+    const outputs = [...access.outputs.values()];
+    outputPort = outputs.find(p => /Fr330hfr33/i.test(p.name)) || outputs[0];
+    $("status").textContent = outputPort
+      ? `Connected to ${outputPort.name}.`
+      : "No MIDI output found. Check the cable and reset the card.";
+  } catch (error) {
+    $("status").textContent = `Connection failed: ${error.message}`;
+  }
+});
+
+$("apply").addEventListener("click", () => {
+  if (!outputPort) {
+    $("status").textContent = "Connect MIDI first.";
+    return;
+  }
+  const tempo = Math.max(30, Math.min(240, Number($("tempo").value) || 120));
+  const message = [
+    0xF0, 0x7D, 0x46, 0x33, 0x30, 0x33, 0x01,
+    Number($("scale").value),
+    Number($("accent").value),
+    Number($("range").value),
+    tempo & 0x7F, (tempo >> 7) & 0x7F,
+    Number($("root").value),
+    Number($("gate").value),
+    Number($("glide").value),
+    Number($("channel").value),
+    $("midiClock").checked ? 1 : 0,
+    Number($("octave").value),
+    Number($("waveform").value),
+    Number($("distortion").value),
+    Number($("drive").value),
+    Number($("tone").value),
+    0xF7
+  ];
+  outputPort.send(message);
+  $("status").textContent = "Applied to the running card.";
+});
+</script>
+</body>
+</html>
