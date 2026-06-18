@@ -64,7 +64,7 @@ struct AudioParameters {
     uint8_t midiNote;
     uint8_t gate;
     uint8_t accent;
-    uint8_t mute;
+    uint8_t powerCut;
 };
 
 template <typename T>
@@ -386,24 +386,28 @@ public:
         captureHardware();
         receiveAudioParameters();
 
-        if (parameters.mute) {
-            envelope = 0;
-            AudioOut1(0);
-            AudioOut2(0);
-            CVOut1Millivolts(parameters.pitchMillivolts);
-            PulseOut1(false);
-            return;
-        }
+        // Holding the switch down behaves like pulling the batteries from a
+        // running 303. The virtual supply falls slowly enough to expose a
+        // short pitch/filter collapse instead of producing a plain digital mute.
+        int32_t supplyTarget = parameters.powerCut ? 0 : 32767;
+        int32_t supplyDifference = supplyTarget - supplyQ15;
+        int32_t supplyStep = parameters.powerCut
+            ? (supplyDifference >> 11)
+            : (supplyDifference >> 8);
+        if (supplyStep == 0 && supplyDifference != 0)
+            supplyStep = supplyDifference > 0 ? 1 : -1;
+        supplyQ15 += supplyStep;
 
-        if (parameters.gate && !lastGate)
+        bool poweredGate = parameters.gate && !parameters.powerCut;
+        if (poweredGate && !lastGate)
             envelope = 0;
-        lastGate = parameters.gate;
+        lastGate = poweredGate;
 
-        const int32_t envelopeTarget = parameters.gate ? 32767 : 0;
-        int32_t envelopeCoefficient = parameters.gate
+        const int32_t envelopeTarget = poweredGate ? 32767 : 0;
+        int32_t envelopeCoefficient = poweredGate
             ? 6144
             : parameters.envelopeDecayQ15;
-        if (!parameters.gate && parameters.accent) {
+        if (!poweredGate && parameters.accent) {
             envelopeCoefficient += envelopeCoefficient >> 1;
             if (envelopeCoefficient > 32767)
                 envelopeCoefficient = 32767;
@@ -421,7 +425,14 @@ public:
         if (pitchStep == 0 && pitchDifference != 0)
             pitchStep = pitchDifference > 0 ? 1 : -1;
         smoothedIncrement = (uint32_t)((int32_t)smoothedIncrement + pitchStep);
-        phase += smoothedIncrement;
+        // As the supply disappears the oscillator loses roughly five
+        // semitones before its output vanishes. Splitting the multiply avoids
+        // a 64-bit helper in the interrupt.
+        uint32_t pitchDroop = smoothedIncrement >> 2;
+        uint32_t poweredIncrement =
+            smoothedIncrement - pitchDroop +
+            (uint32_t)(((pitchDroop >> 15) * supplyQ15));
+        phase += poweredIncrement;
 
         uint32_t tableIndex = phase >> 26;
         uint32_t fraction = (phase >> 14) & 0x0FFFu;
@@ -431,10 +442,14 @@ public:
 
         int32_t dynamicCutoff = parameters.cutoffQ15 +
             ((envelope * parameters.filterEnvelopeQ15) >> 15);
+        int32_t supplyAuthority = 8192 + ((supplyQ15 * 3) >> 2);
+        dynamicCutoff = (dynamicCutoff * supplyAuthority) >> 15;
         dynamicCutoff = clamp32(dynamicCutoff, 96, 32100);
 
+        int32_t poweredResonance =
+            (parameters.resonanceQ12 * supplyAuthority) >> 15;
         int32_t filtered = processLadder(saw, dynamicCutoff,
-            parameters.resonanceQ12);
+            poweredResonance);
         int32_t amplitude = envelope;
         if (parameters.accent) {
             amplitude += amplitude >> 2;
@@ -442,11 +457,14 @@ public:
                 amplitude = 32767;
         }
 
-        AudioOut1((int16_t)clamp32(
-            (filtered * amplitude) >> 15, -2048, 2047));
-        AudioOut2((int16_t)saw);
-        CVOut1Millivolts(parameters.pitchMillivolts);
-        PulseOut1(parameters.gate);
+        int32_t voice = (filtered * amplitude) >> 15;
+        voice = (voice * supplyQ15) >> 15;
+        int32_t raw = (saw * supplyQ15) >> 15;
+        AudioOut1((int16_t)clamp32(voice, -2048, 2047));
+        AudioOut2((int16_t)clamp32(raw, -2048, 2047));
+        CVOut1Millivolts(
+            (parameters.pitchMillivolts * supplyQ15) >> 15);
+        PulseOut1(poweredGate);
     }
 
 private:
@@ -573,6 +591,7 @@ private:
     uint32_t pulse1Edges = 0;
     uint32_t pulse2Edges = 0;
     int32_t envelope = 0;
+    int32_t supplyQ15 = 0;
     int32_t ladder[4] = {};
     bool lastGate = false;
 };
@@ -636,7 +655,7 @@ void controlWorker()
     parameters.midiNote = BaseMidiNote;
     parameters.phaseIncrement = midiNoteToPhaseIncrement(parameters.midiNote);
     parameters.pitchMillivolts = -2000;
-    parameters.mute = 1;
+    parameters.powerCut = 1;
 
     uint32_t lastPulse2Edges = 0;
     uint64_t nextInternalStep = time_us_64();
@@ -744,7 +763,7 @@ void controlWorker()
             parameters.accent = sequenceAccent;
             parameters.glideQ15 =
                 sequenceGlide ? physicalGlideQ15 : 32767;
-            parameters.mute = 0;
+            parameters.powerCut = 0;
         } else if (mode == PlayMode::CvMidi) {
             parameters.glideQ15 = physicalGlideQ15;
             bool midiTriggered = midi.takeTrigger();
@@ -769,11 +788,11 @@ void controlWorker()
                 parameters.gate = hardware.pulse1High;
                 parameters.accent = 0;
             }
-            parameters.mute = 0;
+            parameters.powerCut = 0;
         } else {
             parameters.gate = 0;
             parameters.accent = 0;
-            parameters.mute = 1;
+            parameters.powerCut = 1;
         }
 
         publishSnapshot(audioShared, parameters);

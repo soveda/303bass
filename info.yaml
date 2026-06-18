@@ -23,10 +23,10 @@ panel:
         and slower slides.
       source: curated
     z:
-      label: CV / Sequence / Mute
+      label: CV / Sequence / Battery
       description: >-
         Up selects external CV/gate or USB MIDI control, middle selects the
-        random sequencer, and holding down mutes the voice and gate output.
+        random sequencer, and holding down simulates pulling the batteries.
       source: curated
   inputs:
     audio_l:
@@ -107,9 +107,9 @@ panel:
 switch_modes:
   up: External CV/gate or USB MIDI mode. CV In 1 controls pitch and Pulse In 1 controls gate; an active MIDI note takes priority.
   middle: Random generative sequencer. Pulse In 2 supplies external clock, optional MIDI clock advances every 12 ticks, otherwise the configured internal tempo is used.
-  down: Momentary performance mute. Audio and gate outputs are silenced while held.
+  down: Momentary battery pull. Pitch droops, filter and resonance collapse, the gate falls, and both audio outputs die away while held.
 leds:
-  - "LEDs 1, 3, and 5 indicate switch-up CV/MIDI mode, switch-middle sequencer mode, and switch-down mute mode respectively."
+  - "LEDs 1, 3, and 5 indicate switch-up CV/MIDI mode, switch-middle sequencer mode, and switch-down battery-pull mode respectively."
   - "LED 2 follows the current gate, with a dim idle level."
   - "LED 4 indicates accented notes."
   - "LED 6 displays the low four bits of the current MIDI note as brightness."

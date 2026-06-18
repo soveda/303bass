@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-e157c4c1c3d3bc6d5a770f4e67a14e151dcac8ada7dedf71d34280b346a0ea12
+748a49ccaac4f7e76a1d54d7bedfa7768b472d1ed91377242e9c66b7331e2258
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -70,10 +70,12 @@ immediate. Turning Y clockwise lengthens the decay and increases slide time.
 - Gate length and per-step glide probability are configurable
 - Optional MIDI clock sync advances the sequence every 12 MIDI clock ticks
 
-### Switch Down — Performance Mute
+### Switch Down — Battery Pull
 
-Holding the momentary switch down mutes both audio outputs and lowers the gate
-output.
+Holding the momentary switch down simulates pulling the batteries from a
+running TB-303. The virtual supply sags, the gate falls, pitch droops, the
+filter and resonance lose authority, and both audio outputs collapse through a
+short dying tail. Releasing the switch restores power smoothly.
 
 ## Outputs
 
@@ -86,7 +88,7 @@ output.
 
 ## LEDs
 
-- LEDs 1, 3, and 5 indicate CV/MIDI, sequencer, and mute modes
+- LEDs 1, 3, and 5 indicate CV/MIDI, sequencer, and battery-pull modes
 - LED 2 follows the gate
 - LED 4 indicates accent
 - LED 6 varies with the current note
@@ -186,8 +188,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 52376 B
-RAM:   59484 B
+FLASH: 52484 B
+RAM:   59596 B
 ```
 
 ## Hardware Test Checklist
