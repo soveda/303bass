@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-0c8e742e3faef98521c11eac74cf3efe36470038b510f4c6367cb889cb73368b
+f2f45a9ea2afcff0e30b2912b6e3c1b43580ccbbff03363e9d9d4dbced8e4aca
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -52,11 +52,11 @@ The three knobs keep the same purpose in every playing mode:
 
 Main controls the resting cutoff with a curved response:
 
-- Low values produce a dark, rounded bass tone.
+- Fully counter-clockwise produces a dark, rounded bass tone.
 - The middle range opens the harmonics progressively and is intended to be the
   broadest useful performance area.
-- High values make the rising saw bright and increasingly expose envelope and
-  resonance interactions.
+- Turning clockwise makes the rising saw brighter and increasingly exposes
+  envelope and resonance interactions.
 - The final cutoff is deliberately capped below the numerical limit to avoid
   brittle high-frequency fizz.
 
@@ -227,8 +227,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 53200 B
-RAM:   60332 B
+FLASH: 53188 B
+RAM:   60316 B
 ```
 
 ## Hardware Test Checklist

@@ -707,9 +707,14 @@ void controlWorker()
         int32_t xKnob = clamp32(hardware.xKnob, 0, 4095);
         int32_t yKnob = clamp32(hardware.yKnob, 0, 4095);
 
+        // This card's physical Main control reads in the opposite direction to
+        // the desired musical gesture, so invert it here: counter-clockwise is
+        // dark and clockwise is bright.
+        int32_t cutoffKnob = 4095 - mainKnob;
+
         // Squared cutoff mapping gives the useful low-frequency area more room.
         parameters.cutoffQ15 = 120 +
-            (int32_t)(((int64_t)mainKnob * mainKnob * 29200) >> 24);
+            (int32_t)(((int64_t)cutoffKnob * cutoffKnob * 29200) >> 24);
 
         // Resonance uses a squared curve: most of X stays smooth and useful,
         // with strong resonance and self-oscillation reserved for the top end.

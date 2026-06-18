@@ -8,8 +8,9 @@ panel:
     main:
       label: Cutoff
       description: >-
-        Sets the ladder filter resting cutoff with a curved response: dark at
-        the bottom, a broad musical middle, and bright near the top.
+        Sets the ladder filter resting cutoff with a curved response:
+        counter-clockwise is dark, the middle is broad and musical, and
+        clockwise is bright.
       source: curated
     x:
       label: Resonance
