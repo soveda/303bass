@@ -26,10 +26,6 @@ boot and sustained stability, pitch, filter and resonance behavior, envelope,
 accent, manual and MIDI legato glide, internal/external/MIDI clocks, Web MIDI
 configuration, outputs, generative sequencing, and battery-pull behavior.
 
-The audio callback has also been inspected at machine-code level and contains
-no function calls, division helpers, floating-point helpers, or software
-64-bit multiplication. Oscilloscope timing remains desirable when suitable
-equipment becomes available, but no functional overrun symptoms were observed.
 
 ## Current Feature Set
 
@@ -206,90 +202,3 @@ When MIDI clock sync is enabled, MIDI Start resets and starts the clock,
 Continue resumes it, Stop pauses it, and each 12 clock ticks advances one
 sequencer step. Pulse In 2 remains available as the highest-priority external
 clock.
-
-## Real-Time Architecture
-
-The RP2040 runs at **192 MHz** and the complete firmware is copied to RAM.
-
-Core 0 is reserved for the 48 kHz audio interrupt:
-
-- oscillator
-- envelope and glide
-- ladder filter
-- audio, CV, and gate outputs
-
-Core 1 handles:
-
-- USB host/device tasks
-- MIDI parsing
-- knob and CV scaling
-- random sequencer and clock timing
-- LED updates
-- coherent parameter snapshots sent to core 0
-
-The generated audio callback contains no division helpers, locks, waits,
-function calls, or software 64-bit multiplication. Physical scope testing is
-still required to confirm the worst-case callback remains below 20 µs.
-
-## Build
-
-Requirements:
-
-- Raspberry Pi Pico SDK at `~/pico-sdk`
-- Cizzle repository at `~/Documents/GitHub/Cizzle`
-- ARM embedded GCC and CMake
-
-The project uses:
-
-- the local `computercard.h`, copied exactly from Cizzle ComputerCard v0.3.0
-- Cizzle's USB MIDI host implementation
-- `PICO_XOSC_STARTUP_DELAY_MULTIPLIER=64`
-- `pico_set_binary_type(Fr330hfr33 copy_to_ram)`
-- a 192 MHz system clock
-
-Build with:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j4
-```
-
-The current build reports:
-
-```text
-FLASH: 53740 B
-RAM:   60876 B
-```
-
-## Hardware Test Record
-
-- Clean boot after reset and cold power-up: passed.
-- Sustained operation at 192 MHz without functional overrun symptoms: passed.
-- Cutoff, resonance, filter contour, accent, decay, and glide behavior: passed.
-- CV pitch, calibrated pitch output, audio outputs, and gate output: passed.
-- Manual Pulse In 2 glide and MIDI legato/last-note priority: passed.
-- Internal, external pulse, and MIDI clock behavior: passed.
-- Web MIDI settings and scale selection: passed.
-- History-aware generative sequencing: passed.
-- Battery-pull behavior on both audio outputs: passed.
-- Direct oscilloscope measurement of the ISR: not performed; equipment was not
-  available.
-
-## Repository Layout
-
-- `Fr330hfr33.cpp`: firmware, DSP, multicore control, MIDI, and sequencer
-- `Fr330hfr33_LUT.cpp` / `Fr330hfr33_LUT.h`: sawtooth lookup table
-- `computercard.h`: local Cizzle ComputerCard v0.3.0 reference
-- `tusb_config.h`: dual-role TinyUSB configuration
-- `usb_descriptors.c`: Fr330hfr33 USB MIDI device identity
-- `web_config/Fr330hfr33.html`: self-contained Web MIDI editor
-- `info.yaml`: Workshop Computer card metadata
-- `uf2/Fr330hfr33-v0.9.0-rc1.uf2`: tested release-candidate firmware
-- `uf2/SHA256SUMS.txt`: release-artifact checksum
-- `build/Fr330hfr33.uf2`: current local build output
-
-## Status
-
-Version `0.9.0-rc1` is an AI-assisted release candidate created and
-hardware-tested with Adrian Vos. It is frozen as the rollback checkpoint for
-any further tuning or release preparation.

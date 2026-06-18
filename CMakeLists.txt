@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.13)
 
 set(PICO_SDK_PATH "/Users/adrianvos/pico-sdk" CACHE PATH "Raspberry Pi Pico SDK")
-set(CIZZLE_PATH "/Users/adrianvos/Documents/GitHub/Cizzle" CACHE PATH "Cizzle reference firmware")
 
 include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
@@ -16,13 +15,12 @@ add_executable(Fr330hfr33
     Fr330hfr33.cpp
     Fr330hfr33_LUT.cpp
     usb_descriptors.c
-    ${CIZZLE_PATH}/usb_midi_host.c
-    ${CIZZLE_PATH}/usb_midi_host_app_driver.c
+    usb_midi_host.c
+    usb_midi_host_app_driver.c
 )
 
 target_include_directories(Fr330hfr33 PRIVATE
     .
-    ${CIZZLE_PATH}
 )
 
 target_link_libraries(Fr330hfr33
