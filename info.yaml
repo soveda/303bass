@@ -112,7 +112,7 @@ panel:
 switch_modes:
   up: External CV/gate or USB MIDI mode. CV In 1 controls pitch, Pulse In 1 controls gate, and holding Pulse In 2 high enables manual glide; overlapping MIDI notes glide automatically without retriggering the envelope.
   middle: Random generative sequencer. Pulse In 2 supplies external clock, optional MIDI clock advances every 12 ticks, otherwise the configured internal tempo is used.
-  down: Momentary battery pull. Pitch droops, filter and resonance collapse, the gate falls, and both audio outputs die away while held.
+  down: Momentary battery pull. The gate falls, the current VCA level is held briefly, then pitch, filter, resonance, and both audio outputs collapse with the virtual supply.
 leds:
   - "LEDs 1, 3, and 5 indicate switch-up CV/MIDI mode, switch-middle sequencer mode, and switch-down battery-pull mode respectively."
   - "LED 2 follows the current gate, with a dim idle level."

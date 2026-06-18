@@ -417,16 +417,23 @@ public:
         lastEnvelopeTrigger = parameters.envelopeTrigger;
         lastGate = poweredGate;
 
-        const int32_t envelopeTarget = poweredGate ? 32767 : 0;
-        int32_t envelopeCoefficient = poweredGate
-            ? 6144
-            : parameters.envelopeDecayQ15;
-        int32_t envelopeDelta = envelopeTarget - envelope;
-        int32_t envelopeStep =
-            (envelopeDelta * envelopeCoefficient) >> 15;
-        if (envelopeStep == 0 && envelopeDelta != 0)
-            envelopeStep = envelopeDelta > 0 ? 1 : -1;
-        envelope += envelopeStep;
+        // During a battery pull, retain the VCA level that existed at the
+        // instant power was removed. Pulse Out still falls immediately, but
+        // Audio Out 1 now survives long enough for the virtual supply, pitch,
+        // filter and resonance collapse to be heard. The supply envelope is
+        // solely responsible for fading the voice to silence.
+        if (!parameters.powerCut) {
+            const int32_t envelopeTarget = poweredGate ? 32767 : 0;
+            int32_t envelopeCoefficient = poweredGate
+                ? 6144
+                : parameters.envelopeDecayQ15;
+            int32_t envelopeDelta = envelopeTarget - envelope;
+            int32_t envelopeStep =
+                (envelopeDelta * envelopeCoefficient) >> 15;
+            if (envelopeStep == 0 && envelopeDelta != 0)
+                envelopeStep = envelopeDelta > 0 ? 1 : -1;
+            envelope += envelopeStep;
+        }
 
         // The filter contour fires at the start of every articulated note and
         // decays even while the gate remains high. This creates the audible

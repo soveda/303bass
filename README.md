@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-3310dd0331b3993319825813325b57c435a6a2c576a9c508e8d50952a03e30a2
+5c3a01a56de3aed640c43eb42d26fa7ebedcfb4b9a2e6574cb386f2ac855b209
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -123,6 +123,12 @@ Holding the momentary switch down simulates pulling the batteries from a
 running TB-303. The virtual supply sags, the gate falls, pitch droops, the
 filter and resonance lose authority, and both audio outputs collapse through a
 longer audible dying tail. Releasing the switch restores power smoothly.
+
+Audio Out 1 holds the VCA level present at the instant the switch is pressed,
+then lets the virtual supply collapse fade it. This prevents the filtered voice
+from turning into a plain mute before the pitch and filter failure can be
+heard. Audio Out 2 remains the continuous raw-oscillator view of the same
+collapse.
 
 ## Outputs
 
@@ -235,8 +241,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 53296 B
-RAM:   60436 B
+FLASH: 53444 B
+RAM:   60580 B
 ```
 
 ## Hardware Test Checklist
