@@ -114,8 +114,8 @@ leds:
   - "LED 4 indicates accented notes."
   - "LED 6 displays the low four bits of the current MIDI note as brightness."
 notes:
-  - "The Web MIDI editor configures scale, root note, accent probability, sequencer octave span, gate length, glide probability, MIDI input channel, internal tempo, and MIDI clock sync."
-  - "The default sequencer base is MIDI note 36 (C2); root note shifts the scale upward chromatically."
+  - "The Web MIDI editor configures scale, root note, base octave, accent probability, sequencer octave span, gate length, glide probability, MIDI input channel, internal tempo, and MIDI clock sync."
+  - "The default sequencer base is MIDI note 36 (C2); the editor can select C1, C2, C3, or C4 before root-note transposition."
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."
   - "Editor settings apply to the running session and currently return to defaults after reset."
   - "MIDI velocity 112-127 produces an accent."

@@ -233,12 +233,14 @@ public:
     bool gate = false;
 
     // Web editor settings. The SysEx payload keeps these in a stable order:
-    // scale, accent, span, tempo LSB/MSB, root, gate, glide, channel, MIDI sync.
+    // scale, accent, span, tempo LSB/MSB, root, gate, glide, channel,
+    // MIDI sync, and base octave.
     uint8_t scale = 0;
     uint8_t accentProbability = 32;
     uint8_t octaveSpan = 2;
     uint16_t tempo = 120;
     uint8_t rootNote = 0;
+    uint8_t baseMidiNote = BaseMidiNote;
     uint8_t gateLength = 60;
     uint8_t glideProbability = 35;
     bool midiClockSync = false;
@@ -247,7 +249,7 @@ private:
     void applySysex()
     {
         // Educational/non-commercial manufacturer ID, "F303", command 1.
-        if (sysexLength != 16 ||
+        if (sysexLength != 17 ||
             sysex[0] != 0x7Du ||
             sysex[1] != 'F' ||
             sysex[2] != '3' ||
@@ -266,6 +268,17 @@ private:
         glideProbability = sysex[13] > 100 ? 100 : sysex[13];
         midiChannel = sysex[14] & 0x0Fu;
         midiClockSync = (sysex[15] & 0x01u) != 0;
+        switch (sysex[16]) {
+        case 24:
+        case 36:
+        case 48:
+        case 60:
+            baseMidiNote = sysex[16];
+            break;
+        default:
+            baseMidiNote = BaseMidiNote;
+            break;
+        }
         if (!midiClockSync) {
             midiClockRunning = false;
             midiClockTicks = 0;
@@ -278,7 +291,7 @@ private:
     uint8_t dataCount = 0;
     bool noteTriggered = false;
     bool inSysex = false;
-    uint8_t sysex[16] = {};
+    uint8_t sysex[20] = {};
     uint8_t sysexLength = 0;
     bool midiClockRunning = false;
     uint8_t midiClockTicks = 0;
@@ -459,7 +472,8 @@ uint32_t nextRandom()
     return randomState;
 }
 
-uint8_t quantizedRandomNote(uint8_t scale, uint8_t octaves, uint8_t root)
+uint8_t quantizedRandomNote(
+    uint8_t scale, uint8_t octaves, uint8_t root, uint8_t baseNote)
 {
     static constexpr uint8_t MajorPentatonic[] = {0, 2, 4, 7, 9};
     static constexpr uint8_t MinorPentatonic[] = {0, 3, 5, 7, 10};
@@ -476,7 +490,7 @@ uint8_t quantizedRandomNote(uint8_t scale, uint8_t octaves, uint8_t root)
         degree = (uint8_t)((value >> 16) % 12u);
     else
         degree = MajorPentatonic[(value >> 16) % 5u];
-    uint32_t note = BaseMidiNote + root + octave * 12u + degree;
+    uint32_t note = baseNote + root + octave * 12u + degree;
     return (uint8_t)(note > 127u ? 127u : note);
 }
 
@@ -587,7 +601,8 @@ void controlWorker()
                 }
                 lastSequencerStepTime = now;
                 sequenceNote = quantizedRandomNote(
-                    midi.scale, clamp32(midi.octaveSpan, 1, 4), midi.rootNote);
+                    midi.scale, clamp32(midi.octaveSpan, 1, 4),
+                    midi.rootNote, midi.baseMidiNote);
                 sequenceAccent =
                     (nextRandom() % 100u) < midi.accentProbability;
                 sequenceGlide =

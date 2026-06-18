@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-0d754d40188cde2530facd2ae7b755fde519da4a2b694f445ddf1b91ceb174c2
+89eb80a0287e942ed87058fe482c567f8725c62a070cf58638c17b7f139cde41
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -65,6 +65,7 @@ immediate. Turning Y clockwise lengthens the decay and increases slide time.
   editor
 - The default lowest note is MIDI note 36 (C2); root transposition moves the
   scale upward by up to eleven semitones
+- Base octave can be selected from C1, C2, C3, or C4
 - Gate length and per-step glide probability are configurable
 - Optional MIDI clock sync advances the sequence every 12 MIDI clock ticks
 
@@ -101,6 +102,7 @@ It controls:
 
 - Scale: major pentatonic, minor pentatonic, major, or chromatic
 - Root note from C to B
+- Base octave: C1/MIDI 24, C2/MIDI 36, C3/MIDI 48, or C4/MIDI 60
 - Accent probability
 - Sequencer range from one to four octaves
 - Gate length from 10% to 95% of the measured step
@@ -183,8 +185,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 51464 B
-RAM:   58572 B
+FLASH: 51400 B
+RAM:   58508 B
 ```
 
 ## Hardware Test Checklist

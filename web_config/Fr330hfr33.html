@@ -67,6 +67,14 @@
         <option value="11">B</option>
       </select>
     </label>
+    <label>Base octave
+      <select id="octave">
+        <option value="24">C1 — MIDI 24</option>
+        <option value="36" selected>C2 — MIDI 36</option>
+        <option value="48">C3 — MIDI 48</option>
+        <option value="60">C4 — MIDI 60</option>
+      </select>
+    </label>
     <label>Gate length: <output id="gateOut">60%</output>
       <input id="gate" type="range" min="10" max="95" value="60">
     </label>
@@ -147,6 +155,7 @@ $("apply").addEventListener("click", () => {
     Number($("glide").value),
     Number($("channel").value),
     $("midiClock").checked ? 1 : 0,
+    Number($("octave").value),
     0xF7
   ];
   outputPort.send(message);
