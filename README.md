@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-89eb80a0287e942ed87058fe482c567f8725c62a070cf58638c17b7f139cde41
+e157c4c1c3d3bc6d5a770f4e67a14e151dcac8ada7dedf71d34280b346a0ea12
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -28,13 +28,14 @@ and worst-case interrupt timing still need testing on the card.
 ## Current Feature Set
 
 - Sawtooth oscillator using a phase accumulator and interpolated lookup table.
-- Four-pole fixed-point resonant ladder filter.
+- Four-pole fixed-point TPT ladder filter with algebraically solved feedback.
 - Single AR envelope controlling amplitude and filter modulation.
 - Velocity accent with a stronger, shorter envelope response.
 - Pitch glide coupled musically to envelope decay.
 - External 1V/oct CV and gate control.
 - USB MIDI device mode for computers and browsers.
 - USB MIDI host mode for class-compliant controllers.
+- Last-note-priority monophonic MIDI handling with clean disconnect recovery.
 - Random scale-quantized sequencer with internal or external clock.
 - Calibrated pitch CV and gate outputs for controlling other modules.
 - Initial single-file Web MIDI editor.
@@ -185,8 +186,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 51400 B
-RAM:   58508 B
+FLASH: 52376 B
+RAM:   59484 B
 ```
 
 ## Hardware Test Checklist

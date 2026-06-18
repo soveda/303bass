@@ -2,7 +2,7 @@ id: Fr330hfr33
 title: Fr330hfr33
 release: WIP / 0.1.0
 summary: Acid bass voice with resonant ladder filter, glide, USB MIDI, and random sequencing
-description: Fixed-point acid bass synthesiser with a sawtooth oscillator, four-pole resonant ladder filter, accented AR envelope, pitch glide, USB MIDI device/host operation, and a scale-aware random sequencer.
+description: Fixed-point acid bass synthesiser with a sawtooth oscillator, four-pole TPT resonant ladder filter, accented AR envelope, pitch glide, USB MIDI device/host operation, and a scale-aware random sequencer.
 panel:
   controls:
     main:
@@ -120,6 +120,7 @@ notes:
   - "Editor settings apply to the running session and currently return to defaults after reset."
   - "MIDI velocity 112-127 produces an accent."
   - "USB MIDI automatically operates as a device or host according to the Workshop Computer USB power role."
+  - "Monophonic MIDI uses last-note priority and clears held notes when USB disconnects."
   - "The firmware runs the RP2040 at 192 MHz, copies the complete binary to RAM, and keeps division, locks, waits, USB work, and software 64-bit multiplication out of the audio callback."
   - "This is a WIP build awaiting full hardware profiling and musical tuning."
 source:

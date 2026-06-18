@@ -325,7 +325,10 @@ private:
         rootNote = sysex[11] > 11 ? 0 : sysex[11];
         gateLength = clamp32(sysex[12], 10, 95);
         glideProbability = sysex[13] > 100 ? 100 : sysex[13];
-        midiChannel = sysex[14] & 0x0Fu;
+        uint8_t nextMidiChannel = sysex[14] & 0x0Fu;
+        if (nextMidiChannel != midiChannel)
+            allNotesOff();
+        midiChannel = nextMidiChannel;
         midiClockSync = (sysex[15] & 0x01u) != 0;
         switch (sysex[16]) {
         case 24:
@@ -493,19 +496,70 @@ private:
     int32_t processLadder(int32_t input, int32_t cutoffQ15,
         int32_t resonanceQ12)
     {
-        // Four zero-delay-style one-pole stages with feedback around the chain.
-        // State stays in audio sample units. Saturation at each stage keeps high
-        // resonance bounded while retaining the sharp 303-like squelch.
-        int32_t driven = input - ((ladder[3] * resonanceQ12) >> 12);
-        driven = clamp32(driven, -4095, 4095);
+        // Four trapezoidal-integrator one-poles form a TPT ladder. Each stage
+        // is affine in the ladder input, which lets us solve the global
+        // feedback path without iteration or division in the audio interrupt.
+        int32_t oneMinusG = 32768 - cutoffQ15;
+        int32_t constant = (oneMinusG * ladder[0]) >> 15;
+        constant = ((cutoffQ15 * constant) >> 15) +
+            ((oneMinusG * ladder[1]) >> 15);
+        constant = ((cutoffQ15 * constant) >> 15) +
+            ((oneMinusG * ladder[2]) >> 15);
+        constant = ((cutoffQ15 * constant) >> 15) +
+            ((oneMinusG * ladder[3]) >> 15);
+
+        int32_t g2 = (cutoffQ15 * cutoffQ15) >> 15;
+        int32_t g4 = (g2 * g2) >> 15;
+        int32_t denominatorQ15 =
+            32768 + ((resonanceQ12 * g4) >> 12);
+        int32_t reciprocalQ15 = reciprocalQ15For(denominatorQ15);
+        int32_t driven = input -
+            ((resonanceQ12 * constant) >> 12);
+        driven = (driven * reciprocalQ15) >> 15;
+        driven = softClip(driveInput(driven));
 
         for (uint32_t i = 0; i < 4; ++i) {
             int32_t delta = driven - ladder[i];
-            ladder[i] += (delta * cutoffQ15) >> 15;
-            ladder[i] = clamp32(ladder[i], -3072, 3072);
-            driven = ladder[i];
+            int32_t integrator = (delta * cutoffQ15) >> 15;
+            int32_t output = integrator + ladder[i];
+            ladder[i] = softClip(output + integrator);
+            driven = output;
         }
-        return ladder[3];
+        return softClip(driven);
+    }
+
+    static int32_t reciprocalQ15For(int32_t denominatorQ15)
+    {
+        denominatorQ15 = clamp32(denominatorQ15, 32768, 163840);
+        uint32_t offset = (uint32_t)(denominatorQ15 - 32768);
+        uint32_t index = offset >> 9;
+        uint32_t fraction = offset & 0x1FFu;
+        if (index >= 256u)
+            return ReciprocalQ15Table[256];
+        int32_t a = ReciprocalQ15Table[index];
+        int32_t b = ReciprocalQ15Table[index + 1u];
+        return a + (((b - a) * (int32_t)fraction) >> 9);
+    }
+
+    static int32_t driveInput(int32_t value)
+    {
+        // A modest pre-drive gives the resonance loop enough energy to sing
+        // while the following soft clip keeps it bounded.
+        return value + (value >> 1);
+    }
+
+    static int32_t softClip(int32_t value)
+    {
+        // Piecewise fixed-point saturation: linear through the centre, then a
+        // gentler slope before the final rail. This is cheap enough to use at
+        // every ladder stage and prevents resonance runaway.
+        bool negative = value < 0;
+        int32_t magnitude = negative ? -value : value;
+        if (magnitude > 2048)
+            magnitude = 2048 + ((magnitude - 2048) >> 2);
+        if (magnitude > 3072)
+            magnitude = 3072;
+        return negative ? -magnitude : magnitude;
     }
 
     AudioParameters parameters = {
@@ -575,6 +629,7 @@ void controlWorker()
         tuh_init(0);
     else
         tud_init(0);
+    bool deviceWasMounted = false;
 
     HardwareSnapshot hardware = {};
     AudioParameters parameters = {};
@@ -600,6 +655,10 @@ void controlWorker()
             tuh_task();
         } else {
             tud_task();
+            bool deviceMounted = tud_mounted();
+            if (deviceWasMounted && !deviceMounted)
+                midi.allNotesOff();
+            deviceWasMounted = deviceMounted;
             uint8_t bytes[64];
             uint32_t count = tud_midi_stream_read(bytes, sizeof(bytes));
             for (uint32_t i = 0; i < count; ++i)
@@ -706,7 +765,7 @@ void controlWorker()
                 parameters.phaseIncrement =
                     pitchUnitsToPhaseIncrement(pitchUnits);
                 parameters.pitchMillivolts =
-                    (hardware.cv1 * 1000) / PitchCountsPerVolt;
+                    -2000 + (hardware.cv1 * 1000) / PitchCountsPerVolt;
                 parameters.gate = hardware.pulse1High;
                 parameters.accent = 0;
             }
@@ -747,6 +806,7 @@ extern "C" void tuh_midi_umount_cb(uint8_t dev_addr, uint8_t instance)
     (void)instance;
     if (dev_addr == hostMidiDeviceAddress)
         hostMidiDeviceAddress = 0;
+    midi.allNotesOff();
 }
 
 extern "C" void tuh_midi_rx_cb(uint8_t dev_addr, uint32_t num_packets)
