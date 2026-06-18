@@ -333,7 +333,7 @@ private:
             sysex[5] != 0x01u)
             return;
 
-        scale = sysex[6] > 4 ? 0 : sysex[6];
+        scale = sysex[6] > 5 ? 0 : sysex[6];
         accentProbability = sysex[7] > 100 ? 100 : sysex[7];
         octaveSpan = clamp32(sysex[8], 1, 4);
         tempo = clamp32(
@@ -663,6 +663,7 @@ uint8_t quantizedRandomNote(
     static constexpr uint8_t MinorPentatonic[] = {0, 3, 5, 7, 10};
     static constexpr uint8_t Ionian[] = {0, 2, 4, 5, 7, 9, 11};
     static constexpr uint8_t Lydian[] = {0, 2, 4, 6, 7, 9, 11};
+    static constexpr uint8_t MelodicMinor[] = {0, 2, 3, 5, 7, 9, 11};
     static int32_t currentPosition = 0;
     static int32_t recentPositions[3] = {-1, -1, -1};
     static uint8_t previousScale = 255;
@@ -671,7 +672,9 @@ uint8_t quantizedRandomNote(
     static uint8_t previousBase = 255;
 
     uint8_t degreeCount =
-        (scale == 2 || scale == 3) ? 7u : scale == 4 ? 12u : 5u;
+        (scale == 2 || scale == 3 || scale == 4)
+        ? 7u
+        : scale == 5 ? 12u : 5u;
     int32_t positionCount = degreeCount * octaves;
 
     if (scale != previousScale || octaves != previousOctaves ||
@@ -727,6 +730,8 @@ uint8_t quantizedRandomNote(
     else if (scale == 3)
         degree = Lydian[degreeIndex];
     else if (scale == 4)
+        degree = MelodicMinor[degreeIndex];
+    else if (scale == 5)
         degree = degreeIndex;
     else
         degree = MajorPentatonic[degreeIndex];

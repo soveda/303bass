@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-bbca456fa83ebda8adb7b806fa944c23c401537a5115d05f96ecc380830d4169
+50aaab12139e2a007f69be9eff87c80a5031bf7ab8d40b23b73c7c0e04f091a3
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -165,8 +165,8 @@ web_config/Fr330hfr33.html
 
 It controls:
 
-- Scale: major pentatonic, minor pentatonic, Ionian (major), Lydian, or
-  chromatic
+- Scale: major pentatonic, minor pentatonic, Ionian (major), Lydian,
+  ascending melodic minor, or chromatic
 - Root note from C to B
 - Base octave: C1/MIDI 24, C2/MIDI 36, C3/MIDI 48, or C4/MIDI 60
 - Accent probability
@@ -251,8 +251,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 53692 B
-RAM:   60828 B
+FLASH: 53740 B
+RAM:   60876 B
 ```
 
 ## Hardware Test Checklist
