@@ -84,7 +84,7 @@ panel:
       label: |-
         Raw
         Saw
-      description: Raw pre-filter sawtooth oscillator.
+      description: Phase-aligned raw sawtooth oscillator for blending with the filtered voice.
       source: curated
     cv_out_1:
       label: |-

@@ -505,7 +505,13 @@ public:
         if (parameters.accent)
             voice += voice >> 2;
         voice = (voice * supplyQ15) >> 15;
-        int32_t raw = (saw * supplyQ15) >> 15;
+        // A four-pole low-pass rotates the signal phase even though both
+        // outputs originate from the same oscillator sample. Two first-order
+        // all-pass stages track that rotation without changing the raw saw's
+        // magnitude response, so blending both outputs no longer creates the
+        // pronounced parallel-filter cancellation heard in an external mixer.
+        int32_t phaseAlignedSaw = processRawAllpass(saw, dynamicCutoff);
+        int32_t raw = (phaseAlignedSaw * supplyQ15) >> 15;
         AudioOut1((int16_t)clamp32(voice, -2048, 2047));
         AudioOut2((int16_t)clamp32(raw, -2048, 2047));
         CVOut1Millivolts(
@@ -592,6 +598,25 @@ private:
         return softClip(driven);
     }
 
+    int32_t processRawAllpass(int32_t input, int32_t cutoffQ15)
+    {
+        // For the TPT one-pole used by the ladder, (2 * low-pass) - input is
+        // a unity-magnitude all-pass with twice the one-pole phase rotation.
+        // Cascading two stages therefore follows the phase of four low-pass
+        // poles while leaving the oscillator spectrum unfiltered.
+        for (uint32_t i = 0; i < 2; ++i) {
+            int32_t delta = input - rawAllpass[i];
+            int32_t product = delta * cutoffQ15;
+            int32_t integrator = product >= 0
+                ? (product + 16384) >> 15
+                : -(((-product) + 16384) >> 15);
+            int32_t lowpass = integrator + rawAllpass[i];
+            rawAllpass[i] = lowpass + integrator;
+            input = (lowpass << 1) - input;
+        }
+        return input;
+    }
+
     static int32_t reciprocalQ15For(int32_t denominatorQ15)
     {
         denominatorQ15 = clamp32(denominatorQ15, 32768, 163840);
@@ -640,6 +665,7 @@ private:
     int32_t filterEnvelope = 0;
     int32_t supplyQ15 = 0;
     int32_t ladder[4] = {};
+    int32_t rawAllpass[2] = {};
     bool lastGate = false;
     uint32_t lastEnvelopeTrigger = 0;
 };

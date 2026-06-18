@@ -139,12 +139,14 @@ Audio Out 1 holds the VCA level present at the instant the switch is pressed,
 then lets the virtual supply collapse fade it. This prevents the filtered voice
 from turning into a plain mute before the pitch and filter failure can be
 heard. Audio Out 2 remains the continuous raw-oscillator view of the same
-collapse.
+collapse. Its magnitude response is unfiltered, with cutoff-tracking all-pass
+phase compensation so it can be blended with Audio Out 1 without pronounced
+parallel-filter cancellation.
 
 ## Outputs
 
 - `Audio Out 1`: enveloped post-filter voice
-- `Audio Out 2`: raw pre-filter sawtooth oscillator
+- `Audio Out 2`: phase-aligned raw sawtooth oscillator
 - `CV Out 1`: calibrated 1V/oct pitch output
 - `Pulse Out 1`: current gate
 - `CV Out 2`: unused
