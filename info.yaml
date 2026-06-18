@@ -7,20 +7,24 @@ panel:
   controls:
     main:
       label: Cutoff
-      description: Sets the ladder filter cutoff frequency.
+      description: >-
+        Sets the ladder filter resting cutoff with a curved response: dark at
+        the bottom, a broad musical middle, and bright near the top.
       source: curated
     x:
       label: Resonance
       description: >-
-        Sets filter resonance, from a rounded low-pass response to strong
-        resonance and self-oscillation at the upper end.
+        Uses a curved response: the lower range adds body, the upper range
+        becomes nasal and acid-like, and self-oscillation is reserved for the
+        final part of travel. It also adds a moderate amount of filter-envelope
+        sweep.
       source: curated
     'y':
       label: Decay / Glide
       description: >-
         Couples envelope decay and pitch glide. Counter-clockwise gives short
         notes with nearly immediate pitch changes; clockwise gives longer notes
-        and slower slides.
+        and increasingly obvious curved slides.
       source: curated
     z:
       label: CV / Sequence / Battery

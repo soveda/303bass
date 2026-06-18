@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-98e0fcfc4ebeb7a9029652e3a55362cc3e03ee3a6730af4abfaa835f75fa1e15
+0c8e742e3faef98521c11eac74cf3efe36470038b510f4c6367cb889cb73368b
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -48,8 +48,35 @@ The three knobs keep the same purpose in every playing mode:
 - **X:** resonance
 - **Y:** envelope decay and glide
 
-With Y counter-clockwise, notes are short and pitch changes are nearly
-immediate. Turning Y clockwise lengthens the decay and increases slide time.
+### Filter Behavior
+
+Main controls the resting cutoff with a curved response:
+
+- Low values produce a dark, rounded bass tone.
+- The middle range opens the harmonics progressively and is intended to be the
+  broadest useful performance area.
+- High values make the rising saw bright and increasingly expose envelope and
+  resonance interactions.
+- The final cutoff is deliberately capped below the numerical limit to avoid
+  brittle high-frequency fizz.
+
+X controls resonance with a strongly curved response:
+
+- The lower half adds body and a gentle emphasis around the cutoff.
+- The upper half becomes increasingly nasal and acid-like.
+- Strong resonance is concentrated near the top of the knob.
+- Self-oscillation should appear only near the final 10–15% of travel.
+
+X also increases filter-envelope depth, but more gently than before. This means
+turning up resonance still makes the envelope sweep more animated without
+forcing maximum resonance, maximum sweep, and heavy saturation to arrive at
+the same time.
+
+Y controls both envelope decay and glide. Counter-clockwise gives short notes
+and nearly immediate pitch changes. The new curved glide response becomes
+clearly slower through the upper half, with long, obvious slides near maximum.
+Glide only applies when selected by Pulse In 2, MIDI legato, or sequencer glide
+probability.
 
 ### Switch Up — CV / MIDI
 
@@ -87,7 +114,7 @@ new envelope and changes pitch immediately, unless Pulse In 2 is held high.
 Holding the momentary switch down simulates pulling the batteries from a
 running TB-303. The virtual supply sags, the gate falls, pitch droops, the
 filter and resonance lose authority, and both audio outputs collapse through a
-short dying tail. Releasing the switch restores power smoothly.
+longer audible dying tail. Releasing the switch restores power smoothly.
 
 ## Outputs
 
@@ -200,8 +227,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 53124 B
-RAM:   60252 B
+FLASH: 53200 B
+RAM:   60332 B
 ```
 
 ## Hardware Test Checklist

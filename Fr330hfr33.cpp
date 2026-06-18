@@ -401,7 +401,7 @@ public:
         int32_t supplyTarget = parameters.powerCut ? 0 : 32767;
         int32_t supplyDifference = supplyTarget - supplyQ15;
         int32_t supplyStep = parameters.powerCut
-            ? (supplyDifference >> 11)
+            ? (supplyDifference >> 13)
             : (supplyDifference >> 8);
         if (supplyStep == 0 && supplyDifference != 0)
             supplyStep = supplyDifference > 0 ? 1 : -1;
@@ -455,7 +455,7 @@ public:
             ((envelope * parameters.filterEnvelopeQ15) >> 15);
         int32_t supplyAuthority = 8192 + ((supplyQ15 * 3) >> 2);
         dynamicCutoff = (dynamicCutoff * supplyAuthority) >> 15;
-        dynamicCutoff = clamp32(dynamicCutoff, 96, 32100);
+        dynamicCutoff = clamp32(dynamicCutoff, 96, 30000);
 
         int32_t poweredResonance =
             (parameters.resonanceQ12 * supplyAuthority) >> 15;
@@ -572,9 +572,9 @@ private:
 
     static int32_t driveInput(int32_t value)
     {
-        // A modest pre-drive gives the resonance loop enough energy to sing
-        // while the following soft clip keeps it bounded.
-        return value + (value >> 1);
+        // A small pre-drive keeps the voice lively without making high cutoff,
+        // resonance, and envelope settings fizz against every ladder stage.
+        return value + (value >> 3);
     }
 
     static int32_t softClip(int32_t value)
@@ -584,8 +584,8 @@ private:
         // every ladder stage and prevents resonance runaway.
         bool negative = value < 0;
         int32_t magnitude = negative ? -value : value;
-        if (magnitude > 2048)
-            magnitude = 2048 + ((magnitude - 2048) >> 2);
+        if (magnitude > 2304)
+            magnitude = 2304 + ((magnitude - 2304) >> 3);
         if (magnitude > 3072)
             magnitude = 3072;
         return negative ? -magnitude : magnitude;
@@ -709,18 +709,24 @@ void controlWorker()
 
         // Squared cutoff mapping gives the useful low-frequency area more room.
         parameters.cutoffQ15 = 120 +
-            (int32_t)(((int64_t)mainKnob * mainKnob * 31000) >> 24);
-        parameters.resonanceQ12 = (xKnob * 17400) / 4095;
+            (int32_t)(((int64_t)mainKnob * mainKnob * 29200) >> 24);
+
+        // Resonance uses a squared curve: most of X stays smooth and useful,
+        // with strong resonance and self-oscillation reserved for the top end.
+        parameters.resonanceQ12 =
+            (int32_t)(((int64_t)xKnob * xKnob * 14500) >> 24);
 
         // One musically coupled control: clockwise gives a longer envelope and
         // more glide. Coefficients are calculated here, never in the ISR.
         parameters.envelopeDecayQ15 =
             24 + ((4095 - yKnob) * 900) / 4095;
-        int32_t physicalGlideQ15 =
-            32767 - (yKnob * 32500) / 4095;
-        if (physicalGlideQ15 < 48)
-            physicalGlideQ15 = 48;
-        parameters.filterEnvelopeQ15 = 9000 + (xKnob * 15000) / 4095;
+        int32_t inverseY = 4095 - yKnob;
+        int32_t physicalGlideQ15 = 32 +
+            (int32_t)(((int64_t)inverseY * inverseY * 32735) >> 24);
+
+        // X still adds some envelope sweep, but no longer stacks an extreme
+        // sweep on top of maximum resonance.
+        parameters.filterEnvelopeQ15 = 5500 + (xKnob * 7000) / 4095;
 
         uint64_t now = time_us_64();
         if (mode == PlayMode::Sequencer) {
