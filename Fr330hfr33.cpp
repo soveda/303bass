@@ -8,6 +8,7 @@
 #include "tusb.h"
 #include "usb_midi_host.h"
 
+#include <array>
 #include <stdint.h>
 
 namespace {
@@ -16,6 +17,21 @@ constexpr uint32_t SampleRate = 48000;
 constexpr int32_t PitchCountsPerVolt = 341;
 constexpr uint8_t BaseMidiNote = 36;
 constexpr uint32_t ControlPublishDivider = 48;
+constexpr int32_t PitchUnitsPerOctave = 4096;
+constexpr int32_t MinPitchUnits = -2 * PitchUnitsPerOctave;
+constexpr int32_t MaxPitchUnits = 8 * PitchUnitsPerOctave;
+
+constexpr std::array<uint16_t, 257> makeReciprocalQ15Table()
+{
+    std::array<uint16_t, 257> table = {};
+    for (uint32_t i = 0; i < table.size(); ++i) {
+        uint32_t denominatorQ15 = 32768u + i * 512u;
+        table[i] = (uint16_t)((1u << 30) / denominatorQ15);
+    }
+    return table;
+}
+
+constexpr auto ReciprocalQ15Table = makeReciprocalQ15Table();
 
 enum class PlayMode : uint8_t {
     Mute = 0,
@@ -99,20 +115,19 @@ uint32_t pitchUnitsToPhaseIncrement(int32_t units)
         32768, 34716, 36781, 38968, 41285, 43740, 46341,
         49097, 52016, 55109, 58386, 61858, 65536
     };
-    static constexpr int32_t UnitsPerOctave = 4096;
     static constexpr uint32_t C2PhaseIncrement = 5852465u;
 
-    units = clamp32(units, -2 * UnitsPerOctave, 7 * UnitsPerOctave);
-    int32_t octaves = units / UnitsPerOctave;
-    int32_t remainder = units % UnitsPerOctave;
+    units = clamp32(units, MinPitchUnits, MaxPitchUnits);
+    int32_t octaves = units / PitchUnitsPerOctave;
+    int32_t remainder = units % PitchUnitsPerOctave;
     if (remainder < 0) {
-        remainder += UnitsPerOctave;
+        remainder += PitchUnitsPerOctave;
         --octaves;
     }
 
-    int32_t semitone = (remainder * 12) / UnitsPerOctave;
-    int32_t start = (semitone * UnitsPerOctave) / 12;
-    int32_t end = ((semitone + 1) * UnitsPerOctave) / 12;
+    int32_t semitone = (remainder * 12) / PitchUnitsPerOctave;
+    int32_t start = (semitone * PitchUnitsPerOctave) / 12;
+    int32_t end = ((semitone + 1) * PitchUnitsPerOctave) / 12;
     int32_t fraction = ((remainder - start) << 15) / (end - start);
     uint32_t ratio = SemitoneRatioQ15[semitone] +
         (uint32_t)((((int32_t)SemitoneRatioQ15[semitone + 1] -
@@ -198,13 +213,18 @@ public:
         if ((runningStatus & 0x0Fu) != midiChannel)
             return;
         if (type == 0x90u && data[1] != 0) {
-            note = data[0];
-            velocity = data[1];
-            gate = true;
-            noteTriggered = true;
-        } else if ((type == 0x80u || type == 0x90u) && data[0] == note) {
-            gate = false;
+            noteOn(data[0], data[1]);
+        } else if (type == 0x80u || type == 0x90u) {
+            noteOff(data[0]);
         }
+    }
+
+    void allNotesOff()
+    {
+        for (uint32_t i = 0; i < 128; ++i)
+            heldNotes[i] = false;
+        gate = false;
+        noteTriggered = false;
     }
 
     bool takeTrigger()
@@ -246,6 +266,45 @@ public:
     bool midiClockSync = false;
 
 private:
+    void noteOn(uint8_t nextNote, uint8_t nextVelocity)
+    {
+        heldNotes[nextNote] = true;
+        heldOrder[nextNote] = ++noteOrder;
+        heldVelocity[nextNote] = nextVelocity;
+        note = nextNote;
+        velocity = nextVelocity;
+        gate = true;
+        noteTriggered = true;
+    }
+
+    void noteOff(uint8_t releasedNote)
+    {
+        heldNotes[releasedNote] = false;
+        if (releasedNote != note)
+            return;
+
+        bool found = false;
+        uint32_t newestOrder = 0;
+        uint8_t newestNote = note;
+        for (uint32_t i = 0; i < 128; ++i) {
+            if (heldNotes[i] && (!found || heldOrder[i] > newestOrder)) {
+                found = true;
+                newestOrder = heldOrder[i];
+                newestNote = (uint8_t)i;
+            }
+        }
+
+        if (!found) {
+            gate = false;
+            return;
+        }
+
+        note = newestNote;
+        velocity = heldVelocity[newestNote];
+        gate = true;
+        noteTriggered = true;
+    }
+
     void applySysex()
     {
         // Educational/non-commercial manufacturer ID, "F303", command 1.
@@ -296,6 +355,10 @@ private:
     bool midiClockRunning = false;
     uint8_t midiClockTicks = 0;
     uint8_t pendingMidiSteps = 0;
+    bool heldNotes[128] = {};
+    uint8_t heldVelocity[128] = {};
+    uint32_t heldOrder[128] = {};
+    uint32_t noteOrder = 0;
 };
 
 MidiParser midi;
