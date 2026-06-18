@@ -24,8 +24,9 @@ panel:
       label: Decay / Glide
       description: >-
         Couples envelope decay and pitch glide. Counter-clockwise gives short
-        notes with nearly immediate pitch changes; clockwise gives longer notes
-        with a longer downward filter sweep and increasingly obvious slides.
+        notes with nearly immediate pitch changes; selected slides are already
+        obvious around noon, while clockwise gives longer notes, a longer
+        downward filter sweep, and exaggerated slides.
       source: curated
     z:
       label: CV / Sequence / Battery
@@ -124,7 +125,7 @@ notes:
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."
   - "Editor settings apply to the running session and currently return to defaults after reset."
   - "MIDI velocity 112-127 produces an accent."
-  - "Each articulated note fires a decaying filter contour; accent pushes that contour harder for a brighter, punchier note."
+  - "Each articulated note fires a decaying filter contour; accent pushes that contour much harder and adds post-filter gain for a brighter, louder, punchier note."
   - "USB MIDI automatically operates as a device or host according to the Workshop Computer USB power role."
   - "Monophonic MIDI uses last-note priority and clears held notes when USB disconnects."
   - "In CV/MIDI mode, Pulse In 2 high enables manual glide. MIDI note overlaps also create automatic legato glide while keeping the gate and envelope open."

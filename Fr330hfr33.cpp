@@ -33,6 +33,14 @@ constexpr std::array<uint16_t, 257> makeReciprocalQ15Table()
 
 constexpr auto ReciprocalQ15Table = makeReciprocalQ15Table();
 
+// Pitch smoothing coefficient by sixteenth of Y travel. The values are
+// intentionally perceptual rather than linear: the lower end gets out of the
+// way quickly, noon is an obvious acid slide, and the top end becomes long.
+constexpr int32_t GlideCoefficientQ15[17] = {
+    32767, 4096, 1024, 256, 128, 64, 40, 24, 16,
+    12, 9, 7, 5, 4, 3, 2, 1
+};
+
 enum class PlayMode : uint8_t {
     Mute = 0,
     Sequencer = 1,
@@ -474,8 +482,12 @@ public:
 
         int32_t dynamicCutoff = parameters.cutoffQ15 +
             ((filterEnvelope * parameters.filterEnvelopeQ15) >> 15);
-        if (parameters.accent)
-            dynamicCutoff += filterEnvelope >> 3;
+        if (parameters.accent) {
+            // Accent needs to remain obvious after the ladder's nonlinear
+            // stages. Push the filter contour substantially harder rather
+            // than relying on output gain alone.
+            dynamicCutoff += filterEnvelope >> 1;
+        }
         int32_t supplyAuthority = 8192 + ((supplyQ15 * 3) >> 2);
         dynamicCutoff = (dynamicCutoff * supplyAuthority) >> 15;
         dynamicCutoff = clamp32(dynamicCutoff, 96, 32200);
@@ -488,13 +500,10 @@ public:
             32768 + ((poweredResonance * 3) >> 1);
         filtered = (filtered * resonanceMakeupQ15) >> 15;
         int32_t amplitude = envelope;
-        if (parameters.accent) {
-            amplitude += amplitude >> 2;
-            if (amplitude > 32767)
-                amplitude = 32767;
-        }
 
         int32_t voice = (filtered * amplitude) >> 15;
+        if (parameters.accent)
+            voice += voice >> 2;
         voice = (voice * supplyQ15) >> 15;
         int32_t raw = (saw * supplyQ15) >> 15;
         AudioOut1((int16_t)clamp32(voice, -2048, 2047));
@@ -751,9 +760,12 @@ void controlWorker()
         int32_t decayInverse = 4095 - yKnob;
         parameters.envelopeDecayQ15 = 1 +
             (int32_t)(((int64_t)decayInverse * decayInverse * 95) >> 24);
-        int32_t inverseY = 4095 - yKnob;
-        int32_t physicalGlideQ15 = 1 +
-            (int32_t)(((int64_t)inverseY * inverseY * 32766) >> 24);
+        uint32_t glideIndex = (uint32_t)yKnob >> 8;
+        uint32_t glideFraction = (uint32_t)yKnob & 0xFFu;
+        int32_t glideA = GlideCoefficientQ15[glideIndex];
+        int32_t glideB = GlideCoefficientQ15[glideIndex + 1u];
+        int32_t physicalGlideQ15 =
+            glideA + (((glideB - glideA) * (int32_t)glideFraction) >> 8);
 
         // X still adds some envelope sweep, but no longer stacks an extreme
         // sweep on top of maximum resonance.

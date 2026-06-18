@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-5c3a01a56de3aed640c43eb42d26fa7ebedcfb4b9a2e6574cb386f2ac855b209
+40f0e397aaf477433cc3819349c7b72d3ffc43c3227feff4cad5fc6f2101967c
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -77,9 +77,9 @@ small amount of extra sweep, so resonance and envelope motion remain usable
 independently.
 
 Y controls both envelope decay and glide. Counter-clockwise gives short notes
-and nearly immediate pitch changes. Clockwise now reaches a much longer
-release and filter sweep, while the curved glide response reaches long,
-unmistakable slides near maximum.
+and nearly immediate pitch changes. The glide map is deliberately perceptual:
+around noon selected slides should already be obvious, while clockwise reaches
+a much longer release, filter sweep, and exaggerated pitch travel.
 Glide only applies when selected by Pulse In 2, MIDI legato, or sequencer glide
 probability.
 
@@ -91,8 +91,9 @@ probability.
 - USB MIDI notes take priority while a MIDI note is held
 - MIDI velocity 112–127 produces an accent
 
-Accent now adds a stronger filter-contour push as well as extra output level,
-so accented notes should sound distinctly brighter and punchier.
+Accent now adds a much stronger filter-contour push plus approximately 25%
+post-filter output gain, so accented notes should sound distinctly brighter,
+louder, and punchier rather than disappearing into the normal VCA ceiling.
 
 Pitch changes are immediate when Pulse In 2 is low. When Pulse In 2 is high,
 the pitch slides at the time set by Y. Pulse In 2 is level-sensitive: hold it
@@ -241,8 +242,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 53444 B
-RAM:   60580 B
+FLASH: 53524 B
+RAM:   60660 B
 ```
 
 ## Hardware Test Checklist
