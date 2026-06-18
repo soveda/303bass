@@ -159,11 +159,12 @@ collapse.
 
 ## Web MIDI Editor
 
-The initial editor is:
+Open the hosted editor:
 
-```text
-web_config/Fr330hfr33.html
-```
+**[Launch the Fr330hfr33 Web MIDI Editor](https://soveda.github.io/303bass/web_config/Fr330hfr33.html)**
+
+The hosted editor has been tested with the hardware and connects successfully
+over Web MIDI.
 
 It controls:
 
@@ -179,7 +180,7 @@ It controls:
 - Internal tempo from 30 to 240 BPM
 - Optional MIDI clock synchronization
 
-Serve it locally:
+Alternatively, serve the editor locally:
 
 ```sh
 python3 -m http.server 5173 --directory web_config
