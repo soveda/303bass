@@ -112,7 +112,7 @@ panel:
       source: curated
 switch_modes:
   up: External CV/gate or USB MIDI mode. CV In 1 controls pitch, Pulse In 1 controls gate, and holding Pulse In 2 high enables manual glide; overlapping MIDI notes glide automatically without retriggering the envelope.
-  middle: Random generative sequencer. Pulse In 2 supplies external clock, optional MIDI clock advances every 12 ticks, otherwise the configured internal tempo is used.
+  middle: History-aware generative sequencer that avoids recent repeats, favors nearby scale motion, and occasionally makes wider or octave jumps. Pulse In 2 supplies external clock, optional MIDI clock advances every 12 ticks, otherwise the configured internal tempo is used.
   down: Momentary battery pull. The gate falls, the current VCA level is held briefly, then pitch, filter, resonance, and both audio outputs collapse with the virtual supply.
 leds:
   - "LEDs 1, 3, and 5 indicate switch-up CV/MIDI mode, switch-middle sequencer mode, and switch-down battery-pull mode respectively."
@@ -120,8 +120,9 @@ leds:
   - "LED 4 indicates accented notes."
   - "LED 6 displays the low four bits of the current MIDI note as brightness."
 notes:
-  - "The Web MIDI editor configures scale, root note, base octave, accent probability, sequencer octave span, gate length, glide probability, MIDI input channel, internal tempo, and MIDI clock sync."
+  - "The Web MIDI editor configures major pentatonic, minor pentatonic, Ionian, Lydian, or chromatic scale plus root note, base octave, accent probability, sequencer octave span, gate length, glide probability, MIDI input channel, internal tempo, and MIDI clock sync."
   - "The default sequencer base is MIDI note 36 (C2); the editor can select C1, C2, C3, or C4 before root-note transposition."
+  - "The note generator remembers recent scale positions to reduce repetition while retaining occasional melodic and octave jumps."
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."
   - "Editor settings apply to the running session and currently return to defaults after reset."
   - "MIDI velocity 112-127 produces an accent."

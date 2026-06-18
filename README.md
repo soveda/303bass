@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-40f0e397aaf477433cc3819349c7b72d3ffc43c3227feff4cad5fc6f2101967c
+bbca456fa83ebda8adb7b806fa944c23c401537a5115d05f96ecc380830d4169
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -37,6 +37,9 @@ and worst-case interrupt timing still need testing on the card.
 - USB MIDI host mode for class-compliant controllers.
 - Last-note-priority monophonic MIDI handling with clean disconnect recovery.
 - Random scale-quantized sequencer with internal or external clock.
+- History-aware melodic generation that avoids immediate repeats, discourages
+  recently played notes, favors nearby scale motion, and occasionally jumps an
+  octave or makes a wider leap.
 - Calibrated pitch CV and gate outputs for controlling other modules.
 - Initial single-file Web MIDI editor.
 
@@ -118,6 +121,11 @@ new envelope and changes pitch immediately, unless Pulse In 2 is held high.
 - Gate length and per-step glide probability are configurable
 - Optional MIDI clock sync advances the sequence every 12 MIDI clock ticks
 
+The generator is not a fixed looping pattern. It remembers the last few scale
+positions, avoids immediate repeats, generally walks to nearby notes, and
+occasionally makes a wider or octave jump. Changing scale, root, base octave,
+or range resets that melodic history.
+
 ### Switch Down — Battery Pull
 
 Holding the momentary switch down simulates pulling the batteries from a
@@ -157,7 +165,8 @@ web_config/Fr330hfr33.html
 
 It controls:
 
-- Scale: major pentatonic, minor pentatonic, major, or chromatic
+- Scale: major pentatonic, minor pentatonic, Ionian (major), Lydian, or
+  chromatic
 - Root note from C to B
 - Base octave: C1/MIDI 24, C2/MIDI 36, C3/MIDI 48, or C4/MIDI 60
 - Accent probability
@@ -242,8 +251,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 53524 B
-RAM:   60660 B
+FLASH: 53692 B
+RAM:   60828 B
 ```
 
 ## Hardware Test Checklist

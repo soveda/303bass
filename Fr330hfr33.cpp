@@ -333,7 +333,7 @@ private:
             sysex[5] != 0x01u)
             return;
 
-        scale = sysex[6] > 3 ? 0 : sysex[6];
+        scale = sysex[6] > 4 ? 0 : sysex[6];
         accentProbability = sysex[7] > 100 ? 100 : sysex[7];
         octaveSpan = clamp32(sysex[8], 1, 4);
         tempo = clamp32(
@@ -661,19 +661,75 @@ uint8_t quantizedRandomNote(
 {
     static constexpr uint8_t MajorPentatonic[] = {0, 2, 4, 7, 9};
     static constexpr uint8_t MinorPentatonic[] = {0, 3, 5, 7, 10};
-    static constexpr uint8_t Major[] = {0, 2, 4, 5, 7, 9, 11};
-    uint32_t value = nextRandom();
-    uint8_t octave = (uint8_t)((value >> 8) % octaves);
-    uint8_t degree;
+    static constexpr uint8_t Ionian[] = {0, 2, 4, 5, 7, 9, 11};
+    static constexpr uint8_t Lydian[] = {0, 2, 4, 6, 7, 9, 11};
+    static int32_t currentPosition = 0;
+    static int32_t recentPositions[3] = {-1, -1, -1};
+    static uint8_t previousScale = 255;
+    static uint8_t previousOctaves = 0;
+    static uint8_t previousRoot = 255;
+    static uint8_t previousBase = 255;
 
+    uint8_t degreeCount =
+        (scale == 2 || scale == 3) ? 7u : scale == 4 ? 12u : 5u;
+    int32_t positionCount = degreeCount * octaves;
+
+    if (scale != previousScale || octaves != previousOctaves ||
+        root != previousRoot || baseNote != previousBase) {
+        currentPosition = 0;
+        for (uint32_t i = 0; i < 3; ++i)
+            recentPositions[i] = -1;
+        previousScale = scale;
+        previousOctaves = octaves;
+        previousRoot = root;
+        previousBase = baseNote;
+    }
+
+    // Most steps move to a nearby scale degree, with occasional wider jumps.
+    // Re-roll candidates found in the short history so small scales no longer
+    // collapse into the same two- or three-note loop.
+    static constexpr int8_t Movements[16] = {
+        -2, -1, -1, 1, 1, 2, -2, 2,
+        -3, 3, -1, 1, -4, 4, -2, 2
+    };
+    int32_t candidate = currentPosition;
+    for (uint32_t attempt = 0; attempt < 8; ++attempt) {
+        uint32_t value = nextRandom();
+        int32_t movement = Movements[value & 0x0Fu];
+        if ((value & 0x70u) == 0x70u)
+            movement += (value & 0x80u) ? degreeCount : -degreeCount;
+
+        candidate = currentPosition + movement;
+        while (candidate < 0)
+            candidate += positionCount;
+        while (candidate >= positionCount)
+            candidate -= positionCount;
+
+        bool recent = candidate == currentPosition;
+        for (uint32_t i = 0; i < 3; ++i)
+            recent = recent || candidate == recentPositions[i];
+        if (!recent)
+            break;
+    }
+
+    for (uint32_t i = 2; i > 0; --i)
+        recentPositions[i] = recentPositions[i - 1];
+    recentPositions[0] = currentPosition;
+    currentPosition = candidate;
+
+    uint8_t octave = (uint8_t)(currentPosition / degreeCount);
+    uint8_t degreeIndex = (uint8_t)(currentPosition % degreeCount);
+    uint8_t degree;
     if (scale == 1)
-        degree = MinorPentatonic[(value >> 16) % 5u];
+        degree = MinorPentatonic[degreeIndex];
     else if (scale == 2)
-        degree = Major[(value >> 16) % 7u];
+        degree = Ionian[degreeIndex];
     else if (scale == 3)
-        degree = (uint8_t)((value >> 16) % 12u);
+        degree = Lydian[degreeIndex];
+    else if (scale == 4)
+        degree = degreeIndex;
     else
-        degree = MajorPentatonic[(value >> 16) % 5u];
+        degree = MajorPentatonic[degreeIndex];
     uint32_t note = baseNote + root + octave * 12u + degree;
     return (uint8_t)(note > 127u ? 127u : note);
 }
