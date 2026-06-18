@@ -106,7 +106,7 @@ panel:
       source: curated
 switch_modes:
   up: External CV/gate or USB MIDI mode. CV In 1 controls pitch and Pulse In 1 controls gate; an active MIDI note takes priority.
-  middle: Random generative sequencer. Pulse In 2 supplies external clock, otherwise the configured internal tempo is used.
+  middle: Random generative sequencer. Pulse In 2 supplies external clock, optional MIDI clock advances every 12 ticks, otherwise the configured internal tempo is used.
   down: Momentary performance mute. Audio and gate outputs are silenced while held.
 leds:
   - "LEDs 1, 3, and 5 indicate switch-up CV/MIDI mode, switch-middle sequencer mode, and switch-down mute mode respectively."
@@ -114,7 +114,8 @@ leds:
   - "LED 4 indicates accented notes."
   - "LED 6 displays the low four bits of the current MIDI note as brightness."
 notes:
-  - "The Web MIDI editor configures scale, accent probability, sequencer octave span, and internal tempo."
+  - "The Web MIDI editor configures scale, root note, accent probability, sequencer octave span, gate length, glide probability, MIDI input channel, internal tempo, and MIDI clock sync."
+  - "The default sequencer base is MIDI note 36 (C2); root note shifts the scale upward chromatically."
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."
   - "Editor settings apply to the running session and currently return to defaults after reset."
   - "MIDI velocity 112-127 produces an accent."

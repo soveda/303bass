@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-b272f0bcf90db98122baeae7e1072c887bb99ef4fdcdfb4ad99e4345d9753968
+0d754d40188cde2530facd2ae7b755fde519da4a2b694f445ddf1b91ceb174c2
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -63,6 +63,10 @@ immediate. Turning Y clockwise lengthens the decay and increases slide time.
 - `Pulse In 2`: external sequencer clock
 - Scale, accent probability, octave range, and tempo come from the Web MIDI
   editor
+- The default lowest note is MIDI note 36 (C2); root transposition moves the
+  scale upward by up to eleven semitones
+- Gate length and per-step glide probability are configurable
+- Optional MIDI clock sync advances the sequence every 12 MIDI clock ticks
 
 ### Switch Down — Performance Mute
 
@@ -96,9 +100,14 @@ web_config/Fr330hfr33.html
 It controls:
 
 - Scale: major pentatonic, minor pentatonic, major, or chromatic
+- Root note from C to B
 - Accent probability
 - Sequencer range from one to four octaves
+- Gate length from 10% to 95% of the measured step
+- Glide probability from 0% to 100%
+- MIDI input channel from 1 to 16
 - Internal tempo from 30 to 240 BPM
+- Optional MIDI clock synchronization
 
 Serve it locally:
 
@@ -118,6 +127,11 @@ browser MIDI dialog, and press **Apply**.
 
 Editor settings currently affect the running session only and return to
 defaults after reset.
+
+When MIDI clock sync is enabled, MIDI Start resets and starts the clock,
+Continue resumes it, Stop pauses it, and each 12 clock ticks advances one
+sequencer step. Pulse In 2 remains available as the highest-priority external
+clock.
 
 ## Real-Time Architecture
 
@@ -169,8 +183,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 49960 B
-RAM:   57068 B
+FLASH: 51464 B
+RAM:   58572 B
 ```
 
 ## Hardware Test Checklist

@@ -16,6 +16,8 @@
   select, input[type="number"] { background: #100e0c; color: #fff3d5;
     border: 1px solid #725638; border-radius: 7px; padding: 10px; }
   input[type="range"] { accent-color: #ffb000; }
+  .check { grid-template-columns: auto 1fr; align-items: center; }
+  .check input { width: 20px; height: 20px; accent-color: #ffb000; }
   button { border: 0; border-radius: 8px; padding: 12px 16px; cursor: pointer;
     background: #ffb000; color: #1b1307; font-weight: 800; }
   button.secondary { background: #493a2b; color: #fff3d5; }
@@ -49,8 +51,54 @@
         <option value="4">4 octaves</option>
       </select>
     </label>
+    <label>Root note
+      <select id="root">
+        <option value="0">C</option>
+        <option value="1">C♯ / D♭</option>
+        <option value="2">D</option>
+        <option value="3">D♯ / E♭</option>
+        <option value="4">E</option>
+        <option value="5">F</option>
+        <option value="6">F♯ / G♭</option>
+        <option value="7">G</option>
+        <option value="8">G♯ / A♭</option>
+        <option value="9">A</option>
+        <option value="10">A♯ / B♭</option>
+        <option value="11">B</option>
+      </select>
+    </label>
+    <label>Gate length: <output id="gateOut">60%</output>
+      <input id="gate" type="range" min="10" max="95" value="60">
+    </label>
+    <label>Glide probability: <output id="glideOut">35%</output>
+      <input id="glide" type="range" min="0" max="100" value="35">
+    </label>
+    <label>MIDI input channel
+      <select id="channel">
+        <option value="0">1</option>
+        <option value="1">2</option>
+        <option value="2">3</option>
+        <option value="3">4</option>
+        <option value="4">5</option>
+        <option value="5">6</option>
+        <option value="6">7</option>
+        <option value="7">8</option>
+        <option value="8">9</option>
+        <option value="9">10</option>
+        <option value="10">11</option>
+        <option value="11">12</option>
+        <option value="12">13</option>
+        <option value="13">14</option>
+        <option value="14">15</option>
+        <option value="15">16</option>
+      </select>
+    </label>
     <label>Internal tempo
       <input id="tempo" type="number" min="30" max="240" value="120">
+    </label>
+    <label class="check">
+      <input id="midiClock" type="checkbox">
+      <span>Synchronize sequencer to MIDI clock</span>
     </label>
     <div class="actions">
       <button id="connect" class="secondary">Connect MIDI</button>
@@ -64,6 +112,10 @@ let outputPort = null;
 const $ = id => document.getElementById(id);
 $("accent").addEventListener("input", () =>
   $("accentOut").value = `${$("accent").value}%`);
+$("gate").addEventListener("input", () =>
+  $("gateOut").value = `${$("gate").value}%`);
+$("glide").addEventListener("input", () =>
+  $("glideOut").value = `${$("glide").value}%`);
 
 $("connect").addEventListener("click", async () => {
   try {
@@ -89,7 +141,13 @@ $("apply").addEventListener("click", () => {
     Number($("scale").value),
     Number($("accent").value),
     Number($("range").value),
-    tempo & 0x7F, (tempo >> 7) & 0x7F, 0xF7
+    tempo & 0x7F, (tempo >> 7) & 0x7F,
+    Number($("root").value),
+    Number($("gate").value),
+    Number($("glide").value),
+    Number($("channel").value),
+    $("midiClock").checked ? 1 : 0,
+    0xF7
   ];
   outputPort.send(message);
   $("status").textContent = "Applied to the running card.";

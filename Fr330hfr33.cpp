@@ -137,6 +137,31 @@ class MidiParser {
 public:
     void process(uint8_t byte)
     {
+        if (byte == 0xF8u) {
+            if (midiClockSync && midiClockRunning) {
+                if (++midiClockTicks >= 12u) {
+                    midiClockTicks = 0;
+                    ++pendingMidiSteps;
+                }
+            }
+            return;
+        }
+        if (byte == 0xFAu) {
+            midiClockTicks = 0;
+            pendingMidiSteps = 0;
+            midiClockRunning = true;
+            return;
+        }
+        if (byte == 0xFBu) {
+            midiClockRunning = true;
+            return;
+        }
+        if (byte == 0xFCu) {
+            midiClockRunning = false;
+            midiClockTicks = 0;
+            pendingMidiSteps = 0;
+            return;
+        }
         if (byte >= 0xF8u)
             return;
 
@@ -189,23 +214,40 @@ public:
         return result;
     }
 
-    uint8_t note = 48;
+    bool takeClockStep()
+    {
+        if (pendingMidiSteps == 0)
+            return false;
+        --pendingMidiSteps;
+        return true;
+    }
+
+    bool clockControlsSequencer() const
+    {
+        return midiClockSync;
+    }
+
+    uint8_t note = BaseMidiNote;
     uint8_t velocity = 100;
     uint8_t midiChannel = 0;
     bool gate = false;
 
-    // Web editor settings. These are intentionally simple stable byte IDs:
-    // scale, accent probability, octave span, tempo low 7 bits, tempo high.
+    // Web editor settings. The SysEx payload keeps these in a stable order:
+    // scale, accent, span, tempo LSB/MSB, root, gate, glide, channel, MIDI sync.
     uint8_t scale = 0;
     uint8_t accentProbability = 32;
     uint8_t octaveSpan = 2;
     uint16_t tempo = 120;
+    uint8_t rootNote = 0;
+    uint8_t gateLength = 60;
+    uint8_t glideProbability = 35;
+    bool midiClockSync = false;
 
 private:
     void applySysex()
     {
         // Educational/non-commercial manufacturer ID, "F303", command 1.
-        if (sysexLength != 11 ||
+        if (sysexLength != 16 ||
             sysex[0] != 0x7Du ||
             sysex[1] != 'F' ||
             sysex[2] != '3' ||
@@ -219,6 +261,16 @@ private:
         octaveSpan = clamp32(sysex[8], 1, 4);
         tempo = clamp32(
             (uint16_t)sysex[9] | ((uint16_t)sysex[10] << 7), 30, 240);
+        rootNote = sysex[11] > 11 ? 0 : sysex[11];
+        gateLength = clamp32(sysex[12], 10, 95);
+        glideProbability = sysex[13] > 100 ? 100 : sysex[13];
+        midiChannel = sysex[14] & 0x0Fu;
+        midiClockSync = (sysex[15] & 0x01u) != 0;
+        if (!midiClockSync) {
+            midiClockRunning = false;
+            midiClockTicks = 0;
+            pendingMidiSteps = 0;
+        }
     }
 
     uint8_t runningStatus = 0;
@@ -228,6 +280,9 @@ private:
     bool inSysex = false;
     uint8_t sysex[16] = {};
     uint8_t sysexLength = 0;
+    bool midiClockRunning = false;
+    uint8_t midiClockTicks = 0;
+    uint8_t pendingMidiSteps = 0;
 };
 
 MidiParser midi;
@@ -378,8 +433,8 @@ private:
     }
 
     AudioParameters parameters = {
-        midiNoteToPhaseIncrement(48), -1000, 4096, 0, 128, 32767, 12000,
-        48, 0, 0, 1
+        midiNoteToPhaseIncrement(BaseMidiNote), -2000,
+        4096, 0, 128, 32767, 12000, BaseMidiNote, 0, 0, 1
     };
     uint32_t audioSlot = 0;
     uint32_t phase = 0;
@@ -404,7 +459,7 @@ uint32_t nextRandom()
     return randomState;
 }
 
-uint8_t quantizedRandomNote(uint8_t scale, uint8_t octaves)
+uint8_t quantizedRandomNote(uint8_t scale, uint8_t octaves, uint8_t root)
 {
     static constexpr uint8_t MajorPentatonic[] = {0, 2, 4, 7, 9};
     static constexpr uint8_t MinorPentatonic[] = {0, 3, 5, 7, 10};
@@ -421,7 +476,8 @@ uint8_t quantizedRandomNote(uint8_t scale, uint8_t octaves)
         degree = (uint8_t)((value >> 16) % 12u);
     else
         degree = MajorPentatonic[(value >> 16) % 5u];
-    return (uint8_t)(BaseMidiNote + 12u + octave * 12u + degree);
+    uint32_t note = BaseMidiNote + root + octave * 12u + degree;
+    return (uint8_t)(note > 127u ? 127u : note);
 }
 
 void updateLeds(PlayMode mode, bool gate, bool accent, uint8_t note)
@@ -445,18 +501,21 @@ void controlWorker()
 
     HardwareSnapshot hardware = {};
     AudioParameters parameters = {};
-    parameters.midiNote = 48;
+    parameters.midiNote = BaseMidiNote;
     parameters.phaseIncrement = midiNoteToPhaseIncrement(parameters.midiNote);
-    parameters.pitchMillivolts = -1000;
+    parameters.pitchMillivolts = -2000;
     parameters.mute = 1;
 
     uint32_t lastPulse2Edges = 0;
     uint64_t nextInternalStep = time_us_64();
     uint64_t lastExternalClockTime = 0;
+    uint64_t lastSequencerStepTime = 0;
+    uint64_t sequencerStepPeriod = 250000;
     uint64_t gateOffTime = 0;
     bool sequenceGate = false;
     bool sequenceAccent = false;
-    uint8_t sequenceNote = 48;
+    bool sequenceGlide = false;
+    uint8_t sequenceNote = BaseMidiNote;
     uint32_t ledDivider = 0;
 
     while (true) {
@@ -490,10 +549,10 @@ void controlWorker()
         // more glide. Coefficients are calculated here, never in the ISR.
         parameters.envelopeDecayQ15 =
             24 + ((4095 - yKnob) * 900) / 4095;
-        parameters.glideQ15 =
+        int32_t physicalGlideQ15 =
             32767 - (yKnob * 32500) / 4095;
-        if (parameters.glideQ15 < 48)
-            parameters.glideQ15 = 48;
+        if (physicalGlideQ15 < 48)
+            physicalGlideQ15 = 48;
         parameters.filterEnvelopeQ15 = 9000 + (xKnob * 15000) / 4095;
 
         uint64_t now = time_us_64();
@@ -509,18 +568,33 @@ void controlWorker()
             bool externalClockActive =
                 lastExternalClockTime != 0 &&
                 now - lastExternalClockTime < 2000000ull;
-            bool internalClock = !externalClockActive &&
+            bool receivedMidiClockStep = midi.takeClockStep();
+            bool midiClockStep =
+                !externalClockActive && receivedMidiClockStep;
+            bool midiClockControls = midi.clockControlsSequencer();
+            bool internalClock = !externalClockActive && !midiClockControls &&
                 now >= nextInternalStep;
             if (internalClock)
                 nextInternalStep = now + stepPeriod;
 
-            if (externalClock || internalClock) {
+            if (externalClock || midiClockStep || internalClock) {
+                if (lastSequencerStepTime != 0) {
+                    uint64_t measured = now - lastSequencerStepTime;
+                    if (measured >= 10000ull && measured <= 2000000ull)
+                        sequencerStepPeriod = measured;
+                } else {
+                    sequencerStepPeriod = stepPeriod;
+                }
+                lastSequencerStepTime = now;
                 sequenceNote = quantizedRandomNote(
-                    midi.scale, clamp32(midi.octaveSpan, 1, 4));
+                    midi.scale, clamp32(midi.octaveSpan, 1, 4), midi.rootNote);
                 sequenceAccent =
                     (nextRandom() % 100u) < midi.accentProbability;
+                sequenceGlide =
+                    (nextRandom() % 100u) < midi.glideProbability;
                 sequenceGate = true;
-                gateOffTime = now + (stepPeriod * 3u) / 5u;
+                gateOffTime = now +
+                    (sequencerStepPeriod * midi.gateLength) / 100u;
             }
             if (sequenceGate && now >= gateOffTime)
                 sequenceGate = false;
@@ -531,8 +605,11 @@ void controlWorker()
                 ((int32_t)sequenceNote - 60) * 1000 / 12;
             parameters.gate = sequenceGate;
             parameters.accent = sequenceAccent;
+            parameters.glideQ15 =
+                sequenceGlide ? physicalGlideQ15 : 32767;
             parameters.mute = 0;
         } else if (mode == PlayMode::CvMidi) {
+            parameters.glideQ15 = physicalGlideQ15;
             bool midiTriggered = midi.takeTrigger();
             (void)midiTriggered;
             if (midi.gate) {
