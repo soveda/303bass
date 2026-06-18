@@ -1,18 +1,18 @@
 # Fr330hfr33
 
-Work-in-progress firmware for the Fr330hfr33 Music Thing Modular Workshop
+Release-candidate firmware for the Fr330hfr33 Music Thing Modular Workshop
 Computer program card.
 
 Fr330hfr33 is a compact acid bass instrument with a sawtooth oscillator,
 four-pole resonant ladder filter, accented AR envelope, pitch glide, USB MIDI,
 and a scale-aware random sequencer.
 
-## Initial Build
+## Release Candidate
 
-Current UF2:
+Hardware-tested release-candidate UF2:
 
 ```text
-build/Fr330hfr33.uf2
+uf2/Fr330hfr33-v0.9.0-rc1.uf2
 ```
 
 SHA-256:
@@ -21,9 +21,15 @@ SHA-256:
 50aaab12139e2a007f69be9eff87c80a5031bf7ab8d40b23b73c7c0e04f091a3
 ```
 
-This initial build compiles successfully but is not yet hardware-qualified.
-Filter tuning, self-oscillation behavior, USB host/device operation, CV pitch,
-and worst-case interrupt timing still need testing on the card.
+Version `0.9.0-rc1` was promoted after the full available hardware test pass:
+boot and sustained stability, pitch, filter and resonance behavior, envelope,
+accent, manual and MIDI legato glide, internal/external/MIDI clocks, Web MIDI
+configuration, outputs, generative sequencing, and battery-pull behavior.
+
+The audio callback has also been inspected at machine-code level and contains
+no function calls, division helpers, floating-point helpers, or software
+64-bit multiplication. Oscilloscope timing remains desirable when suitable
+equipment becomes available, but no functional overrun symptoms were observed.
 
 ## Current Feature Set
 
@@ -255,21 +261,19 @@ FLASH: 53740 B
 RAM:   60876 B
 ```
 
-## Hardware Test Checklist
+## Hardware Test Record
 
-1. Confirm clean boot after reset, not only immediately after flashing.
-2. Scope the audio ISR and verify worst-case execution remains below 20 µs.
-3. Tune the cutoff curve and resonance range by ear.
-4. Check that high resonance self-oscillates without unstable runaway.
-5. Test USB MIDI device and powered USB MIDI host modes separately.
-6. Confirm external Pulse In 2 clock overrides and releases back to internal
-   clock cleanly.
-7. In CV/MIDI mode, confirm Pulse In 2 selects manual glide without retriggering
-   the envelope.
-8. Confirm overlapping MIDI notes glide with last-note priority and no envelope
-   retrigger, then return to an older held note correctly.
-9. Check CV In 1 pitch tracking and calibrated CV Out 1 across several octaves.
-10. Exercise Web MIDI settings at their minimum and maximum values.
+- Clean boot after reset and cold power-up: passed.
+- Sustained operation at 192 MHz without functional overrun symptoms: passed.
+- Cutoff, resonance, filter contour, accent, decay, and glide behavior: passed.
+- CV pitch, calibrated pitch output, audio outputs, and gate output: passed.
+- Manual Pulse In 2 glide and MIDI legato/last-note priority: passed.
+- Internal, external pulse, and MIDI clock behavior: passed.
+- Web MIDI settings and scale selection: passed.
+- History-aware generative sequencing: passed.
+- Battery-pull behavior on both audio outputs: passed.
+- Direct oscilloscope measurement of the ISR: not performed; equipment was not
+  available.
 
 ## Repository Layout
 
@@ -280,10 +284,12 @@ RAM:   60876 B
 - `usb_descriptors.c`: Fr330hfr33 USB MIDI device identity
 - `web_config/Fr330hfr33.html`: self-contained Web MIDI editor
 - `info.yaml`: Workshop Computer card metadata
-- `build/Fr330hfr33.uf2`: current local firmware build
+- `uf2/Fr330hfr33-v0.9.0-rc1.uf2`: tested release-candidate firmware
+- `uf2/SHA256SUMS.txt`: release-artifact checksum
+- `build/Fr330hfr33.uf2`: current local build output
 
 ## Status
 
-Version `0.1.0` is an AI-assisted initial implementation created with Adrian
-Vos. It is intentionally marked **WIP** until the hardware test checklist has
-been completed.
+Version `0.9.0-rc1` is an AI-assisted release candidate created and
+hardware-tested with Adrian Vos. It is frozen as the rollback checkpoint for
+any further tuning or release preparation.

@@ -1,6 +1,6 @@
 id: Fr330hfr33
 title: Fr330hfr33
-release: WIP / 0.1.0
+release: RC1 / 0.9.0
 summary: Acid bass voice with resonant ladder filter, glide, USB MIDI, and random sequencing
 description: Fixed-point acid bass synthesiser with a sawtooth oscillator, four-pole TPT resonant ladder filter, accented AR envelope, pitch glide, USB MIDI device/host operation, and a scale-aware random sequencer.
 panel:
@@ -174,6 +174,6 @@ source_file: data/cards/Fr330hfr33.yml
 metadata:
   creator: Adrian Vos
   language: Pico SDK
-  version: 0.1.0
-  status: WIP
+  version: 0.9.0-rc1
+  status: Release Candidate
   editor_url: web_config/Fr330hfr33.html
