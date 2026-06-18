@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-f2f45a9ea2afcff0e30b2912b6e3c1b43580ccbbff03363e9d9d4dbced8e4aca
+3310dd0331b3993319825813325b57c435a6a2c576a9c508e8d50952a03e30a2
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -57,24 +57,29 @@ Main controls the resting cutoff with a curved response:
   broadest useful performance area.
 - Turning clockwise makes the rising saw brighter and increasingly exposes
   envelope and resonance interactions.
-- The final cutoff is deliberately capped below the numerical limit to avoid
-  brittle high-frequency fizz.
+- Fully clockwise should sound substantially more open than the previous
+  build, approaching the bright end of the available analogue comparison.
 
 X controls resonance with a strongly curved response:
 
 - The lower half adds body and a gentle emphasis around the cutoff.
 - The upper half becomes increasingly nasal and acid-like.
 - Strong resonance is concentrated near the top of the knob.
-- Self-oscillation should appear only near the final 10–15% of travel.
+- Self-oscillation or pinging should appear only near the final part of travel,
+  rather than replacing the useful resonance range.
+- Resonance makeup gain reduces the large volume loss previously heard above
+  noon.
 
-X also increases filter-envelope depth, but more gently than before. This means
-turning up resonance still makes the envelope sweep more animated without
-forcing maximum resonance, maximum sweep, and heavy saturation to arrive at
-the same time.
+Each articulated note now fires a separate filter contour that decays while
+the gate remains high. This should produce an obvious downward “wah” sweep,
+especially around Main noon and X between noon and 3 o’clock. X adds only a
+small amount of extra sweep, so resonance and envelope motion remain usable
+independently.
 
 Y controls both envelope decay and glide. Counter-clockwise gives short notes
-and nearly immediate pitch changes. The new curved glide response becomes
-clearly slower through the upper half, with long, obvious slides near maximum.
+and nearly immediate pitch changes. Clockwise now reaches a much longer
+release and filter sweep, while the curved glide response reaches long,
+unmistakable slides near maximum.
 Glide only applies when selected by Pulse In 2, MIDI legato, or sequencer glide
 probability.
 
@@ -85,6 +90,9 @@ probability.
 - `Pulse In 2` high: manually enables glide for CV and MIDI pitch changes
 - USB MIDI notes take priority while a MIDI note is held
 - MIDI velocity 112–127 produces an accent
+
+Accent now adds a stronger filter-contour push as well as extra output level,
+so accented notes should sound distinctly brighter and punchier.
 
 Pitch changes are immediate when Pulse In 2 is low. When Pulse In 2 is high,
 the pitch slides at the time set by Y. Pulse In 2 is level-sensitive: hold it
@@ -227,8 +235,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 53188 B
-RAM:   60316 B
+FLASH: 53296 B
+RAM:   60436 B
 ```
 
 ## Hardware Test Checklist

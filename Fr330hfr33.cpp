@@ -409,8 +409,11 @@ public:
 
         bool poweredGate = parameters.gate && !parameters.powerCut;
         bool explicitTrigger = parameters.envelopeTrigger != lastEnvelopeTrigger;
-        if ((poweredGate && !lastGate) || explicitTrigger)
+        bool noteTrigger = (poweredGate && !lastGate) || explicitTrigger;
+        if (noteTrigger) {
             envelope = 0;
+            filterEnvelope = 32767;
+        }
         lastEnvelopeTrigger = parameters.envelopeTrigger;
         lastGate = poweredGate;
 
@@ -418,12 +421,23 @@ public:
         int32_t envelopeCoefficient = poweredGate
             ? 6144
             : parameters.envelopeDecayQ15;
-        if (!poweredGate && parameters.accent) {
-            envelopeCoefficient += envelopeCoefficient >> 1;
-            if (envelopeCoefficient > 32767)
-                envelopeCoefficient = 32767;
-        }
-        envelope += ((envelopeTarget - envelope) * envelopeCoefficient) >> 15;
+        int32_t envelopeDelta = envelopeTarget - envelope;
+        int32_t envelopeStep =
+            (envelopeDelta * envelopeCoefficient) >> 15;
+        if (envelopeStep == 0 && envelopeDelta != 0)
+            envelopeStep = envelopeDelta > 0 ? 1 : -1;
+        envelope += envelopeStep;
+
+        // The filter contour fires at the start of every articulated note and
+        // decays even while the gate remains high. This creates the audible
+        // downward "wah" sweep expected from a 303-style voice.
+        int32_t filterDecay = parameters.envelopeDecayQ15;
+        if (parameters.accent)
+            filterDecay += filterDecay >> 1;
+        int32_t filterStep = (filterEnvelope * filterDecay) >> 15;
+        if (filterStep == 0 && filterEnvelope != 0)
+            filterStep = 1;
+        filterEnvelope -= filterStep;
 
         if (smoothedIncrement == 0)
             smoothedIncrement = parameters.phaseIncrement;
@@ -452,15 +466,20 @@ public:
         int32_t saw = a + (((b - a) * (int32_t)fraction) >> 12);
 
         int32_t dynamicCutoff = parameters.cutoffQ15 +
-            ((envelope * parameters.filterEnvelopeQ15) >> 15);
+            ((filterEnvelope * parameters.filterEnvelopeQ15) >> 15);
+        if (parameters.accent)
+            dynamicCutoff += filterEnvelope >> 3;
         int32_t supplyAuthority = 8192 + ((supplyQ15 * 3) >> 2);
         dynamicCutoff = (dynamicCutoff * supplyAuthority) >> 15;
-        dynamicCutoff = clamp32(dynamicCutoff, 96, 30000);
+        dynamicCutoff = clamp32(dynamicCutoff, 96, 32200);
 
         int32_t poweredResonance =
             (parameters.resonanceQ12 * supplyAuthority) >> 15;
         int32_t filtered = processLadder(saw, dynamicCutoff,
             poweredResonance);
+        int32_t resonanceMakeupQ15 =
+            32768 + ((poweredResonance * 3) >> 1);
+        filtered = (filtered * resonanceMakeupQ15) >> 15;
         int32_t amplitude = envelope;
         if (parameters.accent) {
             amplitude += amplitude >> 2;
@@ -602,6 +621,7 @@ private:
     uint32_t pulse1Edges = 0;
     uint32_t pulse2Edges = 0;
     int32_t envelope = 0;
+    int32_t filterEnvelope = 0;
     int32_t supplyQ15 = 0;
     int32_t ladder[4] = {};
     bool lastGate = false;
@@ -707,31 +727,30 @@ void controlWorker()
         int32_t xKnob = clamp32(hardware.xKnob, 0, 4095);
         int32_t yKnob = clamp32(hardware.yKnob, 0, 4095);
 
-        // This card's physical Main control reads in the opposite direction to
-        // the desired musical gesture, so invert it here: counter-clockwise is
-        // dark and clockwise is bright.
-        int32_t cutoffKnob = 4095 - mainKnob;
-
-        // Squared cutoff mapping gives the useful low-frequency area more room.
+        // Hardware testing confirms Main already increases clockwise.
+        // A gently curved map keeps useful low tones while reaching a more
+        // genuinely open top end.
+        int32_t cutoffKnob = mainKnob;
         parameters.cutoffQ15 = 120 +
-            (int32_t)(((int64_t)cutoffKnob * cutoffKnob * 29200) >> 24);
+            (int32_t)(((int64_t)cutoffKnob * cutoffKnob * 31800) >> 24);
 
         // Resonance uses a squared curve: most of X stays smooth and useful,
         // with strong resonance and self-oscillation reserved for the top end.
         parameters.resonanceQ12 =
-            (int32_t)(((int64_t)xKnob * xKnob * 14500) >> 24);
+            (int32_t)(((int64_t)xKnob * xKnob * 10800) >> 24);
 
         // One musically coupled control: clockwise gives a longer envelope and
         // more glide. Coefficients are calculated here, never in the ISR.
-        parameters.envelopeDecayQ15 =
-            24 + ((4095 - yKnob) * 900) / 4095;
+        int32_t decayInverse = 4095 - yKnob;
+        parameters.envelopeDecayQ15 = 1 +
+            (int32_t)(((int64_t)decayInverse * decayInverse * 95) >> 24);
         int32_t inverseY = 4095 - yKnob;
-        int32_t physicalGlideQ15 = 32 +
-            (int32_t)(((int64_t)inverseY * inverseY * 32735) >> 24);
+        int32_t physicalGlideQ15 = 1 +
+            (int32_t)(((int64_t)inverseY * inverseY * 32766) >> 24);
 
         // X still adds some envelope sweep, but no longer stacks an extreme
         // sweep on top of maximum resonance.
-        parameters.filterEnvelopeQ15 = 5500 + (xKnob * 7000) / 4095;
+        parameters.filterEnvelopeQ15 = 11000 + (xKnob * 3000) / 4095;
 
         uint64_t now = time_us_64();
         if (mode == PlayMode::Sequencer) {

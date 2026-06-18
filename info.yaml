@@ -17,15 +17,15 @@ panel:
       description: >-
         Uses a curved response: the lower range adds body, the upper range
         becomes nasal and acid-like, and self-oscillation is reserved for the
-        final part of travel. It also adds a moderate amount of filter-envelope
-        sweep.
+        final part of travel. Resonance makeup reduces level loss, while X adds
+        only a small amount of extra filter-envelope sweep.
       source: curated
     'y':
       label: Decay / Glide
       description: >-
         Couples envelope decay and pitch glide. Counter-clockwise gives short
         notes with nearly immediate pitch changes; clockwise gives longer notes
-        and increasingly obvious curved slides.
+        with a longer downward filter sweep and increasingly obvious slides.
       source: curated
     z:
       label: CV / Sequence / Battery
@@ -124,6 +124,7 @@ notes:
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."
   - "Editor settings apply to the running session and currently return to defaults after reset."
   - "MIDI velocity 112-127 produces an accent."
+  - "Each articulated note fires a decaying filter contour; accent pushes that contour harder for a brighter, punchier note."
   - "USB MIDI automatically operates as a device or host according to the Workshop Computer USB power role."
   - "Monophonic MIDI uses last-note priority and clears held notes when USB disconnects."
   - "In CV/MIDI mode, Pulse In 2 high enables manual glide. MIDI note overlaps also create automatic legato glide while keeping the gate and envelope open."
