@@ -61,11 +61,11 @@ panel:
       source: curated
     pulse_2:
       label: |-
-        Clock
-        In
+        Clock /
+        Slide
       description: >-
-        External sequencer clock in switch-middle mode. Recent external clocks
-        override the internal clock; the internal clock resumes after timeout.
+        External sequencer clock in switch-middle mode. In switch-up CV/MIDI
+        mode, holding this input high manually enables glide for pitch changes.
       source: curated
   outputs:
     audio_out_l:
@@ -105,7 +105,7 @@ panel:
       description: Unused in this build.
       source: curated
 switch_modes:
-  up: External CV/gate or USB MIDI mode. CV In 1 controls pitch and Pulse In 1 controls gate; an active MIDI note takes priority.
+  up: External CV/gate or USB MIDI mode. CV In 1 controls pitch, Pulse In 1 controls gate, and holding Pulse In 2 high enables manual glide; overlapping MIDI notes glide automatically without retriggering the envelope.
   middle: Random generative sequencer. Pulse In 2 supplies external clock, optional MIDI clock advances every 12 ticks, otherwise the configured internal tempo is used.
   down: Momentary battery pull. Pitch droops, filter and resonance collapse, the gate falls, and both audio outputs die away while held.
 leds:
@@ -121,6 +121,7 @@ notes:
   - "MIDI velocity 112-127 produces an accent."
   - "USB MIDI automatically operates as a device or host according to the Workshop Computer USB power role."
   - "Monophonic MIDI uses last-note priority and clears held notes when USB disconnects."
+  - "In CV/MIDI mode, Pulse In 2 high enables manual glide. MIDI note overlaps also create automatic legato glide while keeping the gate and envelope open."
   - "The firmware runs the RP2040 at 192 MHz, copies the complete binary to RAM, and keeps division, locks, waits, USB work, and software 64-bit multiplication out of the audio callback."
   - "This is a WIP build awaiting full hardware profiling and musical tuning."
 source:

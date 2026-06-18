@@ -55,6 +55,7 @@ struct HardwareSnapshot {
 
 struct AudioParameters {
     uint32_t phaseIncrement;
+    uint32_t envelopeTrigger;
     int32_t pitchMillivolts;
     int32_t cutoffQ15;
     int32_t resonanceQ12;
@@ -224,14 +225,7 @@ public:
         for (uint32_t i = 0; i < 128; ++i)
             heldNotes[i] = false;
         gate = false;
-        noteTriggered = false;
-    }
-
-    bool takeTrigger()
-    {
-        bool result = noteTriggered;
-        noteTriggered = false;
-        return result;
+        legatoSlide = false;
     }
 
     bool takeClockStep()
@@ -245,6 +239,16 @@ public:
     bool clockControlsSequencer() const
     {
         return midiClockSync;
+    }
+
+    bool shouldGlide() const
+    {
+        return legatoSlide;
+    }
+
+    uint32_t triggerSerial() const
+    {
+        return articulationSerial;
     }
 
     uint8_t note = BaseMidiNote;
@@ -268,13 +272,16 @@ public:
 private:
     void noteOn(uint8_t nextNote, uint8_t nextVelocity)
     {
+        bool hadHeldNote = gate;
         heldNotes[nextNote] = true;
         heldOrder[nextNote] = ++noteOrder;
         heldVelocity[nextNote] = nextVelocity;
         note = nextNote;
         velocity = nextVelocity;
         gate = true;
-        noteTriggered = true;
+        legatoSlide = hadHeldNote;
+        if (!hadHeldNote)
+            ++articulationSerial;
     }
 
     void noteOff(uint8_t releasedNote)
@@ -296,13 +303,14 @@ private:
 
         if (!found) {
             gate = false;
+            legatoSlide = false;
             return;
         }
 
         note = newestNote;
         velocity = heldVelocity[newestNote];
         gate = true;
-        noteTriggered = true;
+        legatoSlide = true;
     }
 
     void applySysex()
@@ -351,7 +359,6 @@ private:
     uint8_t runningStatus = 0;
     uint8_t data[2] = {};
     uint8_t dataCount = 0;
-    bool noteTriggered = false;
     bool inSysex = false;
     uint8_t sysex[20] = {};
     uint8_t sysexLength = 0;
@@ -362,6 +369,8 @@ private:
     uint8_t heldVelocity[128] = {};
     uint32_t heldOrder[128] = {};
     uint32_t noteOrder = 0;
+    uint32_t articulationSerial = 0;
+    bool legatoSlide = false;
 };
 
 MidiParser midi;
@@ -399,8 +408,10 @@ public:
         supplyQ15 += supplyStep;
 
         bool poweredGate = parameters.gate && !parameters.powerCut;
-        if (poweredGate && !lastGate)
+        bool explicitTrigger = parameters.envelopeTrigger != lastEnvelopeTrigger;
+        if ((poweredGate && !lastGate) || explicitTrigger)
             envelope = 0;
+        lastEnvelopeTrigger = parameters.envelopeTrigger;
         lastGate = poweredGate;
 
         const int32_t envelopeTarget = poweredGate ? 32767 : 0;
@@ -581,7 +592,7 @@ private:
     }
 
     AudioParameters parameters = {
-        midiNoteToPhaseIncrement(BaseMidiNote), -2000,
+        midiNoteToPhaseIncrement(BaseMidiNote), 0, -2000,
         4096, 0, 128, 32767, 12000, BaseMidiNote, 0, 0, 1
     };
     uint32_t audioSlot = 0;
@@ -594,6 +605,7 @@ private:
     int32_t supplyQ15 = 0;
     int32_t ladder[4] = {};
     bool lastGate = false;
+    uint32_t lastEnvelopeTrigger = 0;
 };
 
 Fr330hfr33 card;
@@ -763,11 +775,10 @@ void controlWorker()
             parameters.accent = sequenceAccent;
             parameters.glideQ15 =
                 sequenceGlide ? physicalGlideQ15 : 32767;
+            parameters.envelopeTrigger = 0;
             parameters.powerCut = 0;
         } else if (mode == PlayMode::CvMidi) {
-            parameters.glideQ15 = physicalGlideQ15;
-            bool midiTriggered = midi.takeTrigger();
-            (void)midiTriggered;
+            bool forceSlide = hardware.pulse2High;
             if (midi.gate) {
                 parameters.midiNote = midi.note;
                 parameters.phaseIncrement = midiNoteToPhaseIncrement(midi.note);
@@ -775,6 +786,11 @@ void controlWorker()
                     ((int32_t)midi.note - 60) * 1000 / 12;
                 parameters.gate = 1;
                 parameters.accent = midi.velocity >= 112;
+                parameters.glideQ15 =
+                    (forceSlide || midi.shouldGlide())
+                    ? physicalGlideQ15
+                    : 32767;
+                parameters.envelopeTrigger = midi.triggerSerial();
             } else {
                 int32_t pitchUnits =
                     (hardware.cv1 * 4096) / PitchCountsPerVolt;
@@ -787,11 +803,15 @@ void controlWorker()
                     -2000 + (hardware.cv1 * 1000) / PitchCountsPerVolt;
                 parameters.gate = hardware.pulse1High;
                 parameters.accent = 0;
+                parameters.glideQ15 =
+                    forceSlide ? physicalGlideQ15 : 32767;
+                parameters.envelopeTrigger = 0;
             }
             parameters.powerCut = 0;
         } else {
             parameters.gate = 0;
             parameters.accent = 0;
+            parameters.envelopeTrigger = 0;
             parameters.powerCut = 1;
         }
 

@@ -18,7 +18,7 @@ build/Fr330hfr33.uf2
 SHA-256:
 
 ```text
-748a49ccaac4f7e76a1d54d7bedfa7768b472d1ed91377242e9c66b7331e2258
+98e0fcfc4ebeb7a9029652e3a55362cc3e03ee3a6730af4abfaa835f75fa1e15
 ```
 
 This initial build compiles successfully but is not yet hardware-qualified.
@@ -55,8 +55,20 @@ immediate. Turning Y clockwise lengthens the decay and increases slide time.
 
 - `CV In 1`: 1V/oct pitch
 - `Pulse In 1`: external gate
+- `Pulse In 2` high: manually enables glide for CV and MIDI pitch changes
 - USB MIDI notes take priority while a MIDI note is held
 - MIDI velocity 112–127 produces an accent
+
+Pitch changes are immediate when Pulse In 2 is low. When Pulse In 2 is high,
+the pitch slides at the time set by Y. Pulse In 2 is level-sensitive: hold it
+high across the pitch change that should glide.
+
+MIDI also supports automatic 303-style legato slide. Pressing a new MIDI note
+before releasing the previous note keeps the gate and envelope open, then
+glides to the new pitch using the Y setting. Releasing the newest note while an
+older note remains held glides back to that older note without retriggering the
+envelope. A note played after all previous notes have been released starts a
+new envelope and changes pitch immediately, unless Pulse In 2 is held high.
 
 ### Switch Middle — Random Sequencer
 
@@ -188,8 +200,8 @@ cmake --build build -j4
 The current build reports:
 
 ```text
-FLASH: 52484 B
-RAM:   59596 B
+FLASH: 53124 B
+RAM:   60252 B
 ```
 
 ## Hardware Test Checklist
@@ -201,8 +213,12 @@ RAM:   59596 B
 5. Test USB MIDI device and powered USB MIDI host modes separately.
 6. Confirm external Pulse In 2 clock overrides and releases back to internal
    clock cleanly.
-7. Check CV In 1 pitch tracking and calibrated CV Out 1 across several octaves.
-8. Exercise Web MIDI settings at their minimum and maximum values.
+7. In CV/MIDI mode, confirm Pulse In 2 selects manual glide without retriggering
+   the envelope.
+8. Confirm overlapping MIDI notes glide with last-note priority and no envelope
+   retrigger, then return to an older held note correctly.
+9. Check CV In 1 pitch tracking and calibrated CV Out 1 across several octaves.
+10. Exercise Web MIDI settings at their minimum and maximum values.
 
 ## Repository Layout
 
