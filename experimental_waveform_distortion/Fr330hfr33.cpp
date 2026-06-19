@@ -452,9 +452,15 @@ public:
         // solely responsible for fading the voice to silence.
         if (!parameters.powerCut) {
             const int32_t envelopeTarget = poweredGate ? 32767 : 0;
-            int32_t envelopeCoefficient = poweredGate
-                ? 6144
-                : parameters.envelopeDecayQ15;
+            // Keep note-off release no faster than roughly 20 ms. Y still
+            // reaches its full longer-release range, while the separate
+            // filter contour retains its original fast decay range.
+            constexpr int32_t FastestReleaseQ15 = 34;
+            int32_t releaseCoefficient = parameters.envelopeDecayQ15;
+            if (releaseCoefficient > FastestReleaseQ15)
+                releaseCoefficient = FastestReleaseQ15;
+            int32_t envelopeCoefficient =
+                poweredGate ? 6144 : releaseCoefficient;
             int32_t envelopeDelta = envelopeTarget - envelope;
             int32_t envelopeStep =
                 (envelopeDelta * envelopeCoefficient) >> 15;

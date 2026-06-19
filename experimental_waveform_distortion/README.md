@@ -115,6 +115,9 @@ Y controls both envelope decay and glide. Counter-clockwise gives short notes
 and nearly immediate pitch changes. The glide map is deliberately perceptual:
 around noon selected slides should already be obvious, while clockwise reaches
 a much longer release, filter sweep, and exaggerated pitch travel.
+The experimental VCA has an approximately 20 ms minimum release to suppress
+note-off clicks. This floor affects only amplitude; the filter contour retains
+its faster decay range.
 Glide only applies when selected by Pulse In 2, MIDI legato, or sequencer glide
 probability.
 
