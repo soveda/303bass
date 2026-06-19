@@ -48,6 +48,12 @@
         <option value="1">Square</option>
       </select>
     </label>
+    <label>Diode filter slope
+      <select id="filterPoles">
+        <option value="4">24 dB/octave — 4 pole</option>
+        <option value="3">18 dB/octave — 3 pole</option>
+      </select>
+    </label>
     <label>Filtered voice distortion
       <select id="distortion">
         <option value="0">Off</option>
@@ -187,6 +193,7 @@ $("apply").addEventListener("click", () => {
     Number($("distortion").value),
     Number($("drive").value),
     Number($("tone").value),
+    Number($("filterPoles").value),
     0xF7
   ];
   outputPort.send(message);

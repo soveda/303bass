@@ -21,9 +21,9 @@ constexpr int32_t PitchUnitsPerOctave = 4096;
 constexpr int32_t MinPitchUnits = -2 * PitchUnitsPerOctave;
 constexpr int32_t MaxPitchUnits = 8 * PitchUnitsPerOctave;
 
-constexpr std::array<uint16_t, 257> makeReciprocalQ15Table()
+constexpr std::array<uint16_t, 577> makeReciprocalQ15Table()
 {
-    std::array<uint16_t, 257> table = {};
+    std::array<uint16_t, 577> table = {};
     for (uint32_t i = 0; i < table.size(); ++i) {
         uint32_t denominatorQ15 = 32768u + i * 512u;
         table[i] = (uint16_t)((1u << 30) / denominatorQ15);
@@ -81,6 +81,7 @@ struct AudioParameters {
     uint8_t powerCut;
     uint8_t waveform;
     uint8_t distortion;
+    uint8_t filterPoles;
 };
 
 template <typename T>
@@ -273,7 +274,7 @@ public:
 
     // Web editor settings. The SysEx payload keeps these in a stable order:
     // scale, accent, span, tempo LSB/MSB, root, gate, glide, channel,
-    // MIDI sync, base octave, waveform, distortion, drive, and tone.
+    // MIDI sync, base octave, waveform, distortion, drive, tone, and poles.
     uint8_t scale = 0;
     uint8_t accentProbability = 32;
     uint8_t octaveSpan = 2;
@@ -287,6 +288,7 @@ public:
     uint8_t distortion = 0;
     uint8_t distortionAmount = 50;
     uint8_t distortionTone = 50;
+    uint8_t filterPoles = 4;
 
 private:
     void noteOn(uint8_t nextNote, uint8_t nextVelocity)
@@ -336,7 +338,8 @@ private:
     {
         // Educational/non-commercial manufacturer ID, "F303", command 1.
         if ((sysexLength != 17 && sysexLength != 19 &&
-            sysexLength != 20 && sysexLength != 21) ||
+            sysexLength != 20 && sysexLength != 21 &&
+            sysexLength != 22) ||
             sysex[0] != 0x7Du ||
             sysex[1] != 'F' ||
             sysex[2] != '3' ||
@@ -377,6 +380,8 @@ private:
             distortionAmount = sysex[19] > 100 ? 100 : sysex[19];
         if (sysexLength >= 21)
             distortionTone = sysex[20] > 100 ? 100 : sysex[20];
+        if (sysexLength >= 22)
+            filterPoles = sysex[21] == 3 ? 3 : 4;
         if (!midiClockSync) {
             midiClockRunning = false;
             midiClockTicks = 0;
@@ -523,10 +528,10 @@ public:
 
         int32_t poweredResonance =
             (parameters.resonanceQ12 * supplyAuthority) >> 15;
-        int32_t filtered = processLadder(oscillator, dynamicCutoff,
-            poweredResonance);
+        int32_t filtered = processDiodeLadder(oscillator, dynamicCutoff,
+            poweredResonance, parameters.filterPoles);
         int32_t resonanceMakeupQ15 =
-            32768 + ((poweredResonance * 3) >> 1);
+            32768 + poweredResonance;
         filtered = (filtered * resonanceMakeupQ15) >> 15;
         filtered = processDistortion(filtered, parameters.distortion,
             parameters.distortionGainQ8, parameters.distortionRail,
@@ -545,7 +550,8 @@ public:
         // magnitude response, so blending both outputs no longer creates the
         // pronounced parallel-filter cancellation heard in an external mixer.
         int32_t phaseAlignedOscillator =
-            processRawAllpass(oscillator, dynamicCutoff);
+            processRawAllpass(oscillator, dynamicCutoff,
+                parameters.filterPoles);
         int32_t raw = (phaseAlignedOscillator * supplyQ15) >> 15;
         AudioOut1((int16_t)clamp32(voice, -2048, 2047));
         AudioOut2((int16_t)clamp32(raw, -2048, 2047));
@@ -598,47 +604,63 @@ private:
         }
     }
 
-    int32_t processLadder(int32_t input, int32_t cutoffQ15,
-        int32_t resonanceQ12)
+    int32_t processDiodeLadder(int32_t input, int32_t cutoffQ15,
+        int32_t resonanceQ12, uint8_t poles)
     {
-        // Four trapezoidal-integrator one-poles form a TPT ladder. Each stage
-        // is affine in the ladder input, which lets us solve the global
-        // feedback path without iteration or division in the audio interrupt.
+        // Three or four trapezoidal-integrator one-poles form a diode-style
+        // ladder. Each mode solves its own global feedback path without
+        // iteration or division in the ISR.
+        uint32_t feedbackStages = poles == 3 ? 3u : 4u;
         int32_t oneMinusG = 32768 - cutoffQ15;
         int32_t constant = (oneMinusG * ladder[0]) >> 15;
         constant = ((cutoffQ15 * constant) >> 15) +
             ((oneMinusG * ladder[1]) >> 15);
         constant = ((cutoffQ15 * constant) >> 15) +
             ((oneMinusG * ladder[2]) >> 15);
-        constant = ((cutoffQ15 * constant) >> 15) +
-            ((oneMinusG * ladder[3]) >> 15);
+        if (feedbackStages == 4) {
+            constant = ((cutoffQ15 * constant) >> 15) +
+                ((oneMinusG * ladder[3]) >> 15);
+        }
 
         int32_t g2 = (cutoffQ15 * cutoffQ15) >> 15;
-        int32_t g4 = (g2 * g2) >> 15;
+        int32_t gN = feedbackStages == 3
+            ? (g2 * cutoffQ15) >> 15
+            : (g2 * g2) >> 15;
         int32_t denominatorQ15 =
-            32768 + ((resonanceQ12 * g4) >> 12);
+            32768 + ((resonanceQ12 * gN) >> 12);
         int32_t reciprocalQ15 = reciprocalQ15For(denominatorQ15);
         int32_t driven = input -
             ((resonanceQ12 * constant) >> 12);
         driven = (driven * reciprocalQ15) >> 15;
-        driven = softClip(driveInput(driven));
+        driven = diodePair(driveInput(driven));
 
+        int32_t selectedOutput = 0;
         for (uint32_t i = 0; i < 4; ++i) {
             int32_t delta = driven - ladder[i];
             int32_t integrator = (delta * cutoffQ15) >> 15;
             int32_t output = integrator + ladder[i];
-            ladder[i] = softClip(output + integrator);
+            // Paired-diode conduction has a broad knee rather than the early,
+            // flat rail used by the previous transistor-like stage clip. This
+            // leaves enough loop gain for a healthy sine at high resonance.
+            ladder[i] = diodePair(output + integrator);
             driven = output;
+            if (i + 1u == feedbackStages)
+                selectedOutput = output;
         }
-        return softClip(driven);
+
+        return diodePair(selectedOutput);
     }
 
-    int32_t processRawAllpass(int32_t input, int32_t cutoffQ15)
+    int32_t processRawAllpass(int32_t input, int32_t cutoffQ15,
+        uint8_t poles)
     {
         // For the TPT one-pole used by the ladder, (2 * low-pass) - input is
         // a unity-magnitude all-pass with twice the one-pole phase rotation.
-        // Cascading two stages therefore follows the phase of four low-pass
-        // poles while leaving the oscillator spectrum unfiltered.
+        // Two stages follow four low-pass poles. In three-pole mode, blending
+        // the one- and two-stage all-pass paths gives a practical fractional
+        // phase approximation while retaining a broadly flat raw output.
+        int32_t afterTwoPoles = input;
+        int32_t afterFourPoles = input;
         for (uint32_t i = 0; i < 2; ++i) {
             int32_t delta = input - rawAllpass[i];
             int32_t product = delta * cutoffQ15;
@@ -648,8 +670,14 @@ private:
             int32_t lowpass = integrator + rawAllpass[i];
             rawAllpass[i] = lowpass + integrator;
             input = (lowpass << 1) - input;
+            if (i == 0)
+                afterTwoPoles = input;
+            else
+                afterFourPoles = input;
         }
-        return input;
+        return poles == 3
+            ? (afterTwoPoles + afterFourPoles) >> 1
+            : afterFourPoles;
     }
 
     static int32_t processDistortion(int32_t input, uint8_t mode,
@@ -710,12 +738,12 @@ private:
 
     static int32_t reciprocalQ15For(int32_t denominatorQ15)
     {
-        denominatorQ15 = clamp32(denominatorQ15, 32768, 163840);
+        denominatorQ15 = clamp32(denominatorQ15, 32768, 327680);
         uint32_t offset = (uint32_t)(denominatorQ15 - 32768);
         uint32_t index = offset >> 9;
         uint32_t fraction = offset & 0x1FFu;
-        if (index >= 256u)
-            return ReciprocalQ15Table[256];
+        if (index >= 576u)
+            return ReciprocalQ15Table[576];
         int32_t a = ReciprocalQ15Table[index];
         int32_t b = ReciprocalQ15Table[index + 1u];
         return a + (((b - a) * (int32_t)fraction) >> 9);
@@ -728,24 +756,26 @@ private:
         return value + (value >> 3);
     }
 
-    static int32_t softClip(int32_t value)
+    static int32_t diodePair(int32_t value)
     {
-        // Piecewise fixed-point saturation: linear through the centre, then a
-        // gentler slope before the final rail. This is cheap enough to use at
-        // every ladder stage and prevents resonance runaway.
+        // Cheap piecewise approximation of an anti-parallel diode pair. It is
+        // linear around zero, bends progressively, and reaches its rail much
+        // more gradually than a transistor-style clipper.
         bool negative = value < 0;
         int32_t magnitude = negative ? -value : value;
-        if (magnitude > 2304)
-            magnitude = 2304 + ((magnitude - 2304) >> 3);
         if (magnitude > 3072)
-            magnitude = 3072;
+            magnitude = 2688 + ((magnitude - 3072) >> 3);
+        else if (magnitude > 1536)
+            magnitude = 1536 + (((magnitude - 1536) * 3) >> 2);
+        if (magnitude > 3840)
+            magnitude = 3840;
         return negative ? -magnitude : magnitude;
     }
 
     AudioParameters parameters = {
         midiNoteToPhaseIncrement(BaseMidiNote), 0, -2000,
         4096, 0, 128, 32767, 12000, 768, 1792, 960, 9600, 192,
-        BaseMidiNote, 0, 0, 1, 0, 0
+        BaseMidiNote, 0, 0, 1, 0, 0, 4
     };
     uint32_t audioSlot = 0;
     uint32_t phase = 0;
@@ -933,9 +963,13 @@ void controlWorker()
             (int32_t)(((int64_t)cutoffKnob * cutoffKnob * 31800) >> 24);
 
         // Resonance uses a squared curve: most of X stays smooth and useful,
-        // with strong resonance and self-oscillation reserved for the top end.
+        // while the upper range now crosses the diode ladder's oscillation
+        // threshold instead of merely approaching it.
+        int32_t resonanceMaximum =
+            midi.filterPoles == 3 ? 35000 : 20500;
         parameters.resonanceQ12 =
-            (int32_t)(((int64_t)xKnob * xKnob * 10800) >> 24);
+            (int32_t)(((int64_t)xKnob * xKnob *
+                resonanceMaximum) >> 24);
 
         // One musically coupled control: clockwise gives a longer envelope and
         // more glide. Coefficients are calculated here, never in the ISR.
@@ -953,6 +987,7 @@ void controlWorker()
         // sweep on top of maximum resonance.
         parameters.filterEnvelopeQ15 = 11000 + (xKnob * 3000) / 4095;
         parameters.waveform = midi.waveform;
+        parameters.filterPoles = midi.filterPoles;
         parameters.distortion =
             midi.distortionAmount == 0 ? 0 : midi.distortion;
         parameters.distortionGainQ8 =

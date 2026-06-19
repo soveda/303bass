@@ -24,11 +24,12 @@ F0 7D 46 33 30 33 01
    distortion_mode
    distortion_amount
    distortion_tone
+   filter_poles
 F7
 ```
 
-The complete message is 23 bytes including `F0` and `F7`. The firmware stores
-the 21 bytes between them in `sysex[]`.
+The complete message is 24 bytes including `F0` and `F7`. The firmware stores
+the 22 bytes between them in `sysex[]`.
 
 ## Header
 
@@ -61,8 +62,9 @@ include the leading `F0`.
 | 18 | 19 | Distortion mode | `0` off, `1` RAT-style, `2` Tube Screamer-style |
 | 19 | 20 | Distortion amount | `0–100`; zero bypasses distortion and tone |
 | 20 | 21 | Distortion tone | `0–100`, dark to bright |
+| 21 | 22 | Diode filter poles | `4` for 24 dB/octave, `3` for 18 dB/octave |
 
-Wire byte 22 is `F7`, the SysEx terminator.
+Wire byte 23 is `F7`, the SysEx terminator.
 
 ## Distortion behavior
 
@@ -87,7 +89,8 @@ The firmware accepts these internal SysEx lengths:
 | 17 | Base MIDI note; release-candidate editor |
 | 19 | Distortion mode |
 | 20 | Distortion amount |
-| 21 | Distortion tone; current experimental editor |
+| 21 | Distortion tone; previous experimental editor |
+| 22 | Diode filter pole count; current experimental editor |
 
 Missing experimental fields retain their current/default values:
 
@@ -95,6 +98,7 @@ Missing experimental fields retain their current/default values:
 - Distortion: off
 - Amount: 50%
 - Tone: 50%
+- Diode filter: four pole / 24 dB per octave
 
 Invalid values are clamped or replaced with safe defaults.
 

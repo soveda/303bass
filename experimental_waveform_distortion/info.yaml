@@ -1,14 +1,14 @@
 id: Fr330hfr33
 title: Fr330hfr33 Experimental
 release: Experimental waveform/distortion
-summary: Experimental acid voice with selectable saw/square oscillator and distortion
-description: Experimental fixed-point acid bass synthesiser with Web MIDI-selectable saw or square oscillator and RAT-style or Tube Screamer-style distortion.
+summary: Experimental diode-filter acid voice with selectable oscillator and distortion
+description: Experimental fixed-point acid bass synthesiser with a switchable three- or four-pole diode-style resonant ladder, Web MIDI-selectable saw or square oscillator, and RAT-style or Tube Screamer-style distortion.
 panel:
   controls:
     main:
       label: Cutoff
       description: >-
-        Sets the ladder filter resting cutoff with a curved response:
+        Sets the diode-style ladder filter resting cutoff with a curved response:
         counter-clockwise is dark, the middle is broad and musical, and
         clockwise is bright.
       source: curated
@@ -16,9 +16,9 @@ panel:
       label: Resonance
       description: >-
         Uses a curved response: the lower range adds body, the upper range
-        becomes nasal and acid-like, and self-oscillation is reserved for the
-        final part of travel. Resonance makeup reduces level loss, while X adds
-        only a small amount of extra filter-envelope sweep.
+        becomes nasal and acid-like, and the final part of travel reaches firm
+        self-oscillation. Broad diode-pair saturation keeps the oscillation
+        round, while X adds only a small amount of extra filter-envelope sweep.
       source: curated
     'y':
       label: Decay / Glide

@@ -32,8 +32,8 @@ Release-candidate firmware for the Fr330hfr33 Music Thing Modular Workshop
 Computer program card.
 
 Fr330hfr33 is a compact acid bass instrument with a sawtooth oscillator,
-four-pole resonant ladder filter, accented AR envelope, pitch glide, USB MIDI,
-and a scale-aware random sequencer.
+diode-style resonant ladder filter, accented AR envelope, pitch glide, USB
+MIDI, and a scale-aware random sequencer.
 
 ## Release Candidate
 
@@ -60,7 +60,9 @@ configuration, outputs, generative sequencing, and battery-pull behavior.
 - Web MIDI-selectable sawtooth or raw phase-derived square oscillator.
 - Web MIDI-selectable filtered-voice distortion: off, RAT-style hard clipping,
   or Tube Screamer-style soft clipping, with 0–100% drive and tone controls.
-- Four-pole fixed-point TPT ladder filter with algebraically solved feedback.
+- Fixed-point diode-style TPT ladder filter with algebraically solved feedback.
+- Web MIDI-selectable 24 dB/octave four-pole or 18 dB/octave three-pole
+  response, each with its own feedback and resonance calibration.
 - Single AR envelope controlling amplitude and filter modulation.
 - Velocity accent with a stronger, shorter envelope response.
 - Pitch glide coupled musically to envelope decay.
@@ -87,7 +89,8 @@ The three knobs keep the same purpose in every playing mode:
 
 Main controls the resting cutoff with a curved response:
 
-- Fully counter-clockwise produces a dark, rounded bass tone.
+- Fully counter-clockwise produces a dark, rounded bass tone without the
+  fourth-pole roll-off feeling quite as abrupt.
 - The middle range opens the harmonics progressively and is intended to be the
   broadest useful performance area.
 - Turning clockwise makes the rising saw brighter and increasingly exposes
@@ -100,8 +103,10 @@ X controls resonance with a strongly curved response:
 - The lower half adds body and a gentle emphasis around the cutoff.
 - The upper half becomes increasingly nasal and acid-like.
 - Strong resonance is concentrated near the top of the knob.
-- Self-oscillation or pinging should appear only near the final part of travel,
-  rather than replacing the useful resonance range.
+- Self-oscillation or pinging appears decisively in the final part of travel,
+  while the lower range remains useful for broad resonance.
+- The ladder stages use a broad diode-pair saturation knee, so high resonance
+  builds into a rounder sine instead of being held down by early stage clipping.
 - Resonance makeup gain reduces the large volume loss previously heard above
   noon.
 
