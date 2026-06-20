@@ -120,7 +120,8 @@ leds:
   - "LED 4 indicates accented notes."
   - "LED 6 displays the low four bits of the current MIDI note as brightness."
 notes:
-  - "The Web MIDI editor configures major pentatonic, minor pentatonic, Ionian, Lydian, ascending melodic minor, or chromatic scale plus root note, base octave, accent probability, sequencer octave span, gate length, glide probability, MIDI input channel, internal tempo, and MIDI clock sync."
+  - "The Web MIDI editor configures major pentatonic, minor pentatonic, Ionian, Lydian, ascending melodic minor, or chromatic scale plus root note, base octave, accent probability, sequencer octave span, gate length, legato-transition probability, MIDI input channel, internal tempo, and MIDI clock sync."
+  - "Sequencer legato transitions are prepared one step ahead so the gate remains high: most selected transitions slide to a new pitch without retriggering, while one quarter become true repeated-note ties."
   - "The default sequencer base is MIDI note 36 (C2); the editor can select C1, C2, C3, or C4 before root-note transposition."
   - "The note generator remembers recent scale positions to reduce repetition while retaining occasional melodic and octave jumps."
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."

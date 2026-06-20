@@ -54,7 +54,7 @@ include the leading `F0`.
 | 10 | 11 | Tempo high 7 bits | Result clamped to `30–240` BPM |
 | 11 | 12 | Root note | `0–11`, C through B |
 | 12 | 13 | Gate length | `10–95` percent |
-| 13 | 14 | Glide probability | `0–100` percent |
+| 13 | 14 | Sequencer legato probability | `0–100` percent; selected transitions keep the gate high and become slides or repeated-note ties |
 | 14 | 15 | MIDI input channel | `0–15`, representing channels 1–16 |
 | 15 | 16 | MIDI clock sync | Bit 0: `0` disabled, `1` enabled |
 | 16 | 17 | Base MIDI note | `24`, `36`, `48`, or `60` |

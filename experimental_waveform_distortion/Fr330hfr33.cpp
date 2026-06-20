@@ -656,28 +656,43 @@ private:
     {
         // For the TPT one-pole used by the ladder, (2 * low-pass) - input is
         // a unity-magnitude all-pass with twice the one-pole phase rotation.
-        // Two stages follow four low-pass poles. In three-pole mode, blending
-        // the one- and two-stage all-pass paths gives a practical fractional
-        // phase approximation while retaining a broadly flat raw output.
-        int32_t afterTwoPoles = input;
-        int32_t afterFourPoles = input;
-        for (uint32_t i = 0; i < 2; ++i) {
-            int32_t delta = input - rawAllpass[i];
-            int32_t product = delta * cutoffQ15;
-            int32_t integrator = product >= 0
-                ? (product + 16384) >> 15
-                : -(((-product) + 16384) >> 15);
-            int32_t lowpass = integrator + rawAllpass[i];
-            rawAllpass[i] = lowpass + integrator;
-            input = (lowpass << 1) - input;
-            if (i == 0)
-                afterTwoPoles = input;
-            else
-                afterFourPoles = input;
-        }
-        return poles == 3
-            ? (afterTwoPoles + afterFourPoles) >> 1
-            : afterFourPoles;
+        // Two normal stages follow four low-pass poles. Three-pole mode uses
+        // one normal stage plus a second all-pass whose coefficient is mapped
+        // to half the normal stage's low-frequency group delay. Unlike the
+        // previous average of two phase paths, both modes remain true
+        // unity-magnitude all-pass cascades and cannot cancel within the raw
+        // output itself.
+        int32_t afterTwoPoles = processRawAllpassStage(
+            input, cutoffQ15, rawAllpass[0]);
+        int32_t afterFourPoles = processRawAllpassStage(
+            afterTwoPoles, cutoffQ15, rawAllpass[1]);
+
+        // If g is the ladder coefficient, 2g/(1+g) gives an all-pass whose
+        // group delay at low frequencies approximates one ladder pole rather
+        // than two. The reciprocal table keeps division out of the ISR.
+        int32_t fractionalCutoffQ15 =
+            ((cutoffQ15 << 1) *
+                reciprocalQ15For(32768 + cutoffQ15)) >> 15;
+        fractionalCutoffQ15 =
+            clamp32(fractionalCutoffQ15, 1, 32767);
+        int32_t afterThreePoles = processRawAllpassStage(
+            afterTwoPoles, fractionalCutoffQ15,
+            rawFractionalAllpass);
+
+        return poles == 3 ? afterThreePoles : afterFourPoles;
+    }
+
+    static int32_t processRawAllpassStage(int32_t input,
+        int32_t cutoffQ15, int32_t &state)
+    {
+        int32_t delta = input - state;
+        int32_t product = delta * cutoffQ15;
+        int32_t integrator = product >= 0
+            ? (product + 16384) >> 15
+            : -(((-product) + 16384) >> 15);
+        int32_t lowpass = integrator + state;
+        state = lowpass + integrator;
+        return (lowpass << 1) - input;
     }
 
     static int32_t processDistortion(int32_t input, uint8_t mode,
@@ -788,6 +803,7 @@ private:
     int32_t supplyQ15 = 0;
     int32_t ladder[4] = {};
     int32_t rawAllpass[2] = {};
+    int32_t rawFractionalAllpass = 0;
     int32_t ratToneState = 0;
     int32_t tsBassState = 0;
     int32_t tsTrebleState = 0;
@@ -927,6 +943,11 @@ void controlWorker()
     bool sequenceAccent = false;
     bool sequenceGlide = false;
     uint8_t sequenceNote = BaseMidiNote;
+    bool sequencePrepared = false;
+    bool queuedLegato = false;
+    uint8_t queuedNote = BaseMidiNote;
+    bool queuedAccent = false;
+    uint32_t sequenceTrigger = 0;
     uint32_t ledDivider = 0;
 
     while (true) {
@@ -1032,18 +1053,57 @@ void controlWorker()
                     sequencerStepPeriod = stepPeriod;
                 }
                 lastSequencerStepTime = now;
-                sequenceNote = quantizedRandomNote(
-                    midi.scale, clamp32(midi.octaveSpan, 1, 4),
-                    midi.rootNote, midi.baseMidiNote);
-                sequenceAccent =
-                    (nextRandom() % 100u) < midi.accentProbability;
-                sequenceGlide =
-                    (nextRandom() % 100u) < midi.glideProbability;
+
+                if (!sequencePrepared) {
+                    // The first note starts normally. Later notes are prepared
+                    // one step early so the preceding gate can be held for a
+                    // real tie or slide.
+                    sequenceNote = quantizedRandomNote(
+                        midi.scale, clamp32(midi.octaveSpan, 1, 4),
+                        midi.rootNote, midi.baseMidiNote);
+                    sequenceAccent =
+                        (nextRandom() % 100u) < midi.accentProbability;
+                    sequenceGlide = false;
+                    sequencePrepared = true;
+                    ++sequenceTrigger;
+                } else {
+                    uint8_t previousNote = sequenceNote;
+                    bool legatoTransition = queuedLegato && sequenceGate;
+                    sequenceNote = queuedNote;
+                    sequenceAccent = queuedAccent;
+                    // Repeated legato notes are true ties. Changed legato
+                    // notes keep the gate high and glide without retriggering
+                    // either envelope.
+                    sequenceGlide =
+                        legatoTransition && sequenceNote != previousNote;
+                    if (!legatoTransition)
+                        ++sequenceTrigger;
+                }
                 sequenceGate = true;
                 gateOffTime = now +
                     (sequencerStepPeriod * midi.gateLength) / 100u;
+
+                // Glide Probability now selects a legato transition from this
+                // step into the next. One quarter of selected transitions
+                // repeat the pitch as a tie; the rest prepare a new pitch for
+                // a 303-style slide.
+                queuedLegato =
+                    (nextRandom() % 100u) < midi.glideProbability;
+                bool queuedTie =
+                    queuedLegato && ((nextRandom() & 3u) == 0u);
+                queuedNote = queuedTie
+                    ? sequenceNote
+                    : quantizedRandomNote(
+                        midi.scale, clamp32(midi.octaveSpan, 1, 4),
+                        midi.rootNote, midi.baseMidiNote);
+                queuedAccent = queuedTie
+                    ? sequenceAccent
+                    : (nextRandom() % 100u) < midi.accentProbability;
             }
-            if (sequenceGate && now >= gateOffTime)
+            // A prepared legato transition suppresses note-off so the gate
+            // remains high across the next step boundary. Ordinary steps
+            // still use the configured gate percentage.
+            if (sequenceGate && !queuedLegato && now >= gateOffTime)
                 sequenceGate = false;
 
             parameters.midiNote = sequenceNote;
@@ -1054,9 +1114,12 @@ void controlWorker()
             parameters.accent = sequenceAccent;
             parameters.glideQ15 =
                 sequenceGlide ? physicalGlideQ15 : 32767;
-            parameters.envelopeTrigger = 0;
+            parameters.envelopeTrigger = sequenceTrigger;
             parameters.powerCut = 0;
         } else if (mode == PlayMode::CvMidi) {
+            sequencePrepared = false;
+            queuedLegato = false;
+            sequenceGate = false;
             bool forceSlide = hardware.pulse2High;
             if (midi.gate) {
                 parameters.midiNote = midi.note;
@@ -1088,6 +1151,9 @@ void controlWorker()
             }
             parameters.powerCut = 0;
         } else {
+            sequencePrepared = false;
+            queuedLegato = false;
+            sequenceGate = false;
             parameters.gate = 0;
             parameters.accent = 0;
             parameters.envelopeTrigger = 0;

@@ -158,13 +158,19 @@ new envelope and changes pitch immediately, unless Pulse In 2 is held high.
 - The default lowest note is MIDI note 36 (C2); root transposition moves the
   scale upward by up to eleven semitones
 - Base octave can be selected from C1, C2, C3, or C4
-- Gate length and per-step glide probability are configurable
+- Gate length and per-transition legato probability are configurable
 - Optional MIDI clock sync advances the sequence every 12 MIDI clock ticks
 
 The generator is not a fixed looping pattern. It remembers the last few scale
 positions, avoids immediate repeats, generally walks to nearby notes, and
 occasionally makes a wider or octave jump. Changing scale, root, base octave,
 or range resets that melodic history.
+
+Glide probability now prepares transitions one step ahead. A selected
+transition keeps the gate continuously high: most move to a new pitch and
+glide without retriggering either envelope, while one quarter repeat the
+current pitch as a true tied note. Non-legato steps still close the gate at the
+configured gate length and retrigger normally on the next step.
 
 ### Switch Down — Battery Pull
 
@@ -179,7 +185,10 @@ from turning into a plain mute before the pitch and filter failure can be
 heard. Audio Out 2 remains the continuous raw-oscillator view of the same
 collapse. Its magnitude response is unfiltered, with cutoff-tracking all-pass
 phase compensation so it can be blended with Audio Out 1 without pronounced
-parallel-filter cancellation.
+parallel-filter cancellation. Four-pole mode uses two normal all-pass stages;
+three-pole mode uses one normal stage plus a unity-magnitude fractional phase
+stage, avoiding the high-frequency cancellation caused by averaging phase
+paths.
 
 ## Outputs
 
@@ -222,7 +231,8 @@ It controls:
 - Accent probability
 - Sequencer range from one to four octaves
 - Gate length from 10% to 95% of the measured step
-- Glide probability from 0% to 100%
+- Legato transition probability from 0% to 100%; selected transitions become
+  either true repeated-note ties or slides to a new pitch
 - MIDI input channel from 1 to 16
 - Internal tempo from 30 to 240 BPM
 - Optional MIDI clock synchronization
@@ -250,3 +260,25 @@ When MIDI clock sync is enabled, MIDI Start resets and starts the clock,
 Continue resumes it, Stop pauses it, and each 12 clock ticks advances one
 sequencer step. Pulse In 2 remains available as the highest-priority external
 clock.
+
+## Proposed Possible Future Changes
+
+Ideas worth considering after the current experimental firmware has passed
+hardware testing:
+
+- Separate 16-step lanes for note, accent, gate length, octave, and tie state.
+- Selective randomization, allowing notes to be regenerated while preserving
+  accents, gates, octaves, or other lanes.
+- Variable pattern length plus pattern rotation/offset.
+- Forward, backward, and pendulum playback, with tie handling at turnaround
+  boundaries.
+- Per-step short, medium, or full gate lengths instead of one global gate
+  percentage.
+- Several stored pattern slots with recall from the editor or hardware.
+- Sequencer swing and an optional small timing-jitter control.
+- An acidness/pattern-type control that progressively changes root repetition,
+  interval choices, ties, accents, and gate behavior.
+- Incoming chord analysis that derives a root and permitted note pool for the
+  generator.
+- Velocity or aftertouch modulation of sequence density, gate behavior,
+  cutoff, or resonance.
