@@ -134,9 +134,37 @@ probability.
 - USB MIDI notes take priority while a MIDI note is held
 - MIDI velocity 112–127 produces an accent
 
-Accent now adds a much stronger filter-contour push plus approximately 25%
-post-filter output gain, so accented notes should sound distinctly brighter,
-louder, and punchier rather than disappearing into the normal VCA ceiling.
+Accent adds a stronger filter-contour push and a 50% level lift relative to
+normal notes. The experimental build reserves output headroom and adds a short
+contour-shaped bright component, so accented notes should remain distinctly
+brighter and louder when cutoff is already near maximum or distortion is
+active.
+
+VCA retriggers attack from the current envelope level instead of resetting to
+literal zero, reducing clicks when a new articulation arrives before the
+previous note has completely released.
+
+USB MIDI device disconnect watches TinyUSB's active/suspended bus state as well
+as its callbacks. The RP2040 USB driver deliberately forces VBUS present, so
+the ordinary mounted and physical-connection flags can remain true after the
+DAW cable is removed. Host frame traffic stopping puts the device bus into
+suspend and now clears held MIDI/parser state, latching the filtered voice gate
+low until USB traffic resumes or a fresh physical gate edge takes control.
+
+### Square-Wave Distortion Character
+
+Hardware testing confirms that the RAT-style hard clipping and Tube
+Screamer-style soft clipping are clearly different with the saw oscillator,
+but can sound very similar with the square oscillator. This is expected rather
+than a mode-selection fault.
+
+The raw square has only two amplitude levels and is already effectively
+rail-shaped before it reaches the filter and distortion. Additional
+symmetrical clipping therefore changes its level much more than its waveform
+shape. The saw contains a continuous range of intermediate amplitudes, so the
+hard and soft clipping curves reshape it differently and produce a much more
+obvious contrast. The distortion tone controls still operate in square-wave
+mode.
 
 Pitch changes are immediate when Pulse In 2 is low. When Pulse In 2 is high,
 the pitch slides at the time set by Y. Pulse In 2 is level-sensitive: hold it
@@ -190,6 +218,12 @@ three-pole mode uses one normal stage plus a unity-magnitude fractional phase
 stage, avoiding the high-frequency cancellation caused by averaging phase
 paths.
 
+The 18 dB mode emphasizes the difference between its third-pole output and the
+continuously tracked fourth pole. It retains a third-order far-slope while
+using a higher cutoff calibration to make the contrast with 24 dB mode easier
+to hear on bass waveforms. LED 6 stays fully lit whenever 18 dB mode is
+actually active, providing a hardware confirmation that the setting arrived.
+
 ## Outputs
 
 - `Audio Out 1`: enveloped post-filter voice
@@ -208,12 +242,9 @@ paths.
 
 ## Web MIDI Editor
 
-Open the hosted editor:
-
-**[Launch the Fr330hfr33 Web MIDI Editor](https://soveda.github.io/303bass/web_config/Fr330hfr33.html)**
-
-The hosted editor has been tested with the hardware and connects successfully
-over Web MIDI.
+The public hosted editor currently targets the main release and does not send
+the experimental waveform, distortion, or filter-mode fields. Use the
+experimental folder's local editor for this build.
 
 It controls:
 
@@ -237,7 +268,7 @@ It controls:
 - Internal tempo from 30 to 240 BPM
 - Optional MIDI clock synchronization
 
-Alternatively, serve the editor locally:
+Serve the experimental editor locally:
 
 ```sh
 python3 -m http.server 5173 --directory web_config

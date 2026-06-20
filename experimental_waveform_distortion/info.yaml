@@ -122,6 +122,10 @@ leds:
 notes:
   - "The Web MIDI editor configures major pentatonic, minor pentatonic, Ionian, Lydian, ascending melodic minor, or chromatic scale plus root note, base octave, accent probability, sequencer octave span, gate length, legato-transition probability, MIDI input channel, internal tempo, and MIDI clock sync."
   - "Sequencer legato transitions are prepared one step ahead so the gate remains high: most selected transitions slide to a new pitch without retriggering, while one quarter become true repeated-note ties."
+  - "Experimental accent reserves output headroom and adds a short contour-shaped bright component so accented notes remain distinct near maximum cutoff and through distortion."
+  - "MIDI device or host disconnection latches the gate low until USB reconnects or a fresh physical gate edge explicitly hands control back to CV."
+  - "LED 6 is fully lit in 18 dB three-pole mode, confirming that the experimental editor setting reached the hardware."
+  - "Hardware testing confirms that RAT-style and Tube Screamer-style clipping sound clearly different with the saw but can sound similar with the square. The square is already a two-level, rail-shaped waveform, so additional symmetrical clipping changes its level more than its shape; both tone controls remain active."
   - "The default sequencer base is MIDI note 36 (C2); the editor can select C1, C2, C3, or C4 before root-note transposition."
   - "The note generator remembers recent scale positions to reduce repetition while retaining occasional melodic and octave jumps."
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."

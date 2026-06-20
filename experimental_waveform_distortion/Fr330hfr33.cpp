@@ -244,6 +244,31 @@ public:
         legatoSlide = false;
     }
 
+    void connectionLost()
+    {
+        allNotesOff();
+        runningStatus = 0;
+        dataCount = 0;
+        inSysex = false;
+        sysexLength = 0;
+        ++disconnectSerialValue;
+    }
+
+    uint32_t disconnectSerial() const
+    {
+        return disconnectSerialValue;
+    }
+
+    void connectionRestored()
+    {
+        ++connectionSerialValue;
+    }
+
+    uint32_t connectionSerial() const
+    {
+        return connectionSerialValue;
+    }
+
     bool takeClockStep()
     {
         if (pendingMidiSteps == 0)
@@ -403,6 +428,8 @@ private:
     uint32_t heldOrder[128] = {};
     uint32_t noteOrder = 0;
     uint32_t articulationSerial = 0;
+    uint32_t disconnectSerialValue = 0;
+    uint32_t connectionSerialValue = 0;
     bool legatoSlide = false;
 };
 
@@ -444,7 +471,10 @@ public:
         bool explicitTrigger = parameters.envelopeTrigger != lastEnvelopeTrigger;
         bool noteTrigger = (poweredGate && !lastGate) || explicitTrigger;
         if (noteTrigger) {
-            envelope = 0;
+            // Restarting the VCA from literal zero can create a discontinuity
+            // when the previous note has not fully released. Let it attack
+            // smoothly from its current level; only the filter contour needs
+            // a hard restart for the acid articulation.
             filterEnvelope = 32767;
         }
         lastEnvelopeTrigger = parameters.envelopeTrigger;
@@ -533,6 +563,15 @@ public:
         int32_t resonanceMakeupQ15 =
             32768 + poweredResonance;
         filtered = (filtered * resonanceMakeupQ15) >> 15;
+        if (parameters.accent) {
+            // Add a short, contour-shaped amount of the oscillator back into
+            // the filtered signal. This preserves an obvious bright accent
+            // even when cutoff is already near its ceiling, where another
+            // cutoff increase would be inaudible.
+            int32_t accentBrightnessQ15 = filterEnvelope >> 2;
+            filtered +=
+                ((oscillator - filtered) * accentBrightnessQ15) >> 15;
+        }
         filtered = processDistortion(filtered, parameters.distortion,
             parameters.distortionGainQ8, parameters.distortionRail,
             parameters.distortionKnee);
@@ -541,8 +580,12 @@ public:
         int32_t amplitude = envelope;
 
         int32_t voice = (filtered * amplitude) >> 15;
+        // Leave output headroom so the accent level change survives the final
+        // 12-bit output clamp instead of both accented and normal notes
+        // flattening at the same rail.
+        voice -= voice >> 2;
         if (parameters.accent)
-            voice += voice >> 2;
+            voice += voice >> 1;
         voice = (voice * supplyQ15) >> 15;
         // A four-pole low-pass rotates the signal phase even though both
         // outputs originate from the same oscillator sample. Two first-order
@@ -635,6 +678,7 @@ private:
         driven = diodePair(driveInput(driven));
 
         int32_t selectedOutput = 0;
+        int32_t fourthPoleOutput = 0;
         for (uint32_t i = 0; i < 4; ++i) {
             int32_t delta = driven - ladder[i];
             int32_t integrator = (delta * cutoffQ15) >> 15;
@@ -646,8 +690,17 @@ private:
             driven = output;
             if (i + 1u == feedbackStages)
                 selectedOutput = output;
+            if (i == 3)
+                fourthPoleOutput = output;
         }
 
+        if (feedbackStages == 3) {
+            // Keep the true third-pole output dominant, then emphasize the
+            // spectrum that the tracked fourth pole would have removed. The
+            // asymptotic response remains third order, but the audible
+            // contrast with 24 dB mode is much clearer on bass waveforms.
+            selectedOutput += (selectedOutput - fourthPoleOutput) >> 1;
+        }
         return diodePair(selectedOutput);
     }
 
@@ -906,14 +959,19 @@ uint8_t quantizedRandomNote(
     return (uint8_t)(note > 127u ? 127u : note);
 }
 
-void updateLeds(PlayMode mode, bool gate, bool accent, uint8_t note)
+void updateLeds(PlayMode mode, bool gate, bool accent, uint8_t note,
+    uint8_t filterPoles)
 {
     card.setLed(0, mode == PlayMode::CvMidi ? 4095 : 0);
     card.setLed(2, mode == PlayMode::Sequencer ? 4095 : 0);
     card.setLed(4, mode == PlayMode::Mute ? 4095 : 0);
     card.setLed(1, gate ? 4095 : 96);
     card.setLed(3, accent ? 4095 : 0);
-    card.setLed(5, (uint16_t)(((uint32_t)(note & 0x0Fu) * 4095u) / 15u));
+    // A solid LED 6 is an unmistakable hardware confirmation that the
+    // experimental editor successfully selected three-pole mode.
+    card.setLed(5, filterPoles == 3
+        ? 4095
+        : (uint16_t)(((uint32_t)(note & 0x0Fu) * 3072u) / 15u));
 }
 
 void controlWorker()
@@ -924,7 +982,7 @@ void controlWorker()
         tuh_init(0);
     else
         tud_init(0);
-    bool deviceWasMounted = false;
+    bool deviceWasActive = false;
 
     HardwareSnapshot hardware = {};
     AudioParameters parameters = {};
@@ -948,6 +1006,10 @@ void controlWorker()
     uint8_t queuedNote = BaseMidiNote;
     bool queuedAccent = false;
     uint32_t sequenceTrigger = 0;
+    uint32_t lastMidiDisconnectSerial = midi.disconnectSerial();
+    uint32_t lastMidiConnectionSerial = midi.connectionSerial();
+    uint32_t disconnectPulse1Edges = 0;
+    bool midiDisconnectLock = false;
     uint32_t ledDivider = 0;
 
     while (true) {
@@ -956,9 +1018,16 @@ void controlWorker()
         } else {
             tud_task();
             bool deviceMounted = tud_mounted();
-            if (deviceWasMounted && !deviceMounted)
-                midi.allNotesOff();
-            deviceWasMounted = deviceMounted;
+            bool deviceActive = deviceMounted && !tud_suspended();
+            if (deviceWasActive && !deviceActive)
+                midi.connectionLost();
+            else if (!deviceWasActive && deviceActive)
+                midi.connectionRestored();
+            // RP2040 TinyUSB forces VBUS present, so mounted and connected can
+            // remain true after cable removal. Loss of host frame traffic
+            // instead puts the device into USB suspend, which is the reliable
+            // device-mode indication that the DAW connection has disappeared.
+            deviceWasActive = deviceActive;
             uint8_t bytes[64];
             uint32_t count = tud_midi_stream_read(bytes, sizeof(bytes));
             for (uint32_t i = 0; i < count; ++i)
@@ -982,6 +1051,16 @@ void controlWorker()
         int32_t cutoffKnob = mainKnob;
         parameters.cutoffQ15 = 120 +
             (int32_t)(((int64_t)cutoffKnob * cutoffKnob * 31800) >> 24);
+        if (midi.filterPoles == 3) {
+            // A third-order ladder naturally sounds subtler than the pole
+            // count suggests when compared at the same internal coefficient.
+            // Calibrate it to a higher effective cutoff so the 18 dB setting
+            // has an obvious, musically useful brighter response.
+            parameters.cutoffQ15 +=
+                (parameters.cutoffQ15 >> 1) + 512;
+            parameters.cutoffQ15 =
+                clamp32(parameters.cutoffQ15, 120, 32200);
+        }
 
         // Resonance uses a squared curve: most of X stays smooth and useful,
         // while the upper range now crosses the diode ladder's oscillation
@@ -1023,6 +1102,22 @@ void controlWorker()
             64 + (int32_t)midi.distortionTone * 256 / 100;
 
         uint64_t now = time_us_64();
+        uint32_t midiDisconnectSerial = midi.disconnectSerial();
+        if (midiDisconnectSerial != lastMidiDisconnectSerial) {
+            lastMidiDisconnectSerial = midiDisconnectSerial;
+            midiDisconnectLock = true;
+            disconnectPulse1Edges = hardware.pulse1Edges;
+        }
+        uint32_t midiConnectionSerial = midi.connectionSerial();
+        if (midiConnectionSerial != lastMidiConnectionSerial) {
+            lastMidiConnectionSerial = midiConnectionSerial;
+            midiDisconnectLock = false;
+        }
+        if (midiDisconnectLock &&
+            hardware.pulse1Edges != disconnectPulse1Edges) {
+            // A fresh physical gate edge explicitly hands control back to CV.
+            midiDisconnectLock = false;
+        }
         if (mode == PlayMode::Sequencer) {
             bool externalClock = hardware.pulse2Edges != lastPulse2Edges;
             if (externalClock) {
@@ -1149,6 +1244,11 @@ void controlWorker()
                     forceSlide ? physicalGlideQ15 : 32767;
                 parameters.envelopeTrigger = 0;
             }
+            if (midiDisconnectLock) {
+                parameters.gate = 0;
+                parameters.accent = 0;
+                parameters.glideQ15 = 32767;
+            }
             parameters.powerCut = 0;
         } else {
             sequencePrepared = false;
@@ -1156,7 +1256,9 @@ void controlWorker()
             sequenceGate = false;
             parameters.gate = 0;
             parameters.accent = 0;
-            parameters.envelopeTrigger = 0;
+            // Preserve the last articulation serial. Resetting it here looks
+            // like a new trigger to the audio core and clears the held VCA
+            // level, turning the battery-pull effect into an immediate mute.
             parameters.powerCut = 1;
         }
 
@@ -1165,13 +1267,27 @@ void controlWorker()
         if (++ledDivider >= 20) {
             ledDivider = 0;
             updateLeds(mode, parameters.gate, parameters.accent,
-                parameters.midiNote);
+                parameters.midiNote, parameters.filterPoles);
         }
         sleep_us(500);
     }
 }
 
 } // namespace
+
+extern "C" void tud_mount_cb(void)
+{
+    // TinyUSB's device callback is the authoritative indication that a DAW
+    // connection has returned. Polling alone can miss short USB transitions.
+    midi.connectionRestored();
+}
+
+extern "C" void tud_umount_cb(void)
+{
+    // Release held MIDI state at the USB event itself. The control worker
+    // observes the serial change and latches its output gate low.
+    midi.connectionLost();
+}
 
 extern "C" void tuh_midi_mount_cb(
     uint8_t dev_addr, uint8_t in_ep, uint8_t out_ep,
@@ -1183,6 +1299,7 @@ extern "C" void tuh_midi_mount_cb(
     (void)num_cables_tx;
     if (hostMidiDeviceAddress == 0)
         hostMidiDeviceAddress = dev_addr;
+    midi.connectionRestored();
 }
 
 extern "C" void tuh_midi_umount_cb(uint8_t dev_addr, uint8_t instance)
@@ -1190,7 +1307,7 @@ extern "C" void tuh_midi_umount_cb(uint8_t dev_addr, uint8_t instance)
     (void)instance;
     if (dev_addr == hostMidiDeviceAddress)
         hostMidiDeviceAddress = 0;
-    midi.allNotesOff();
+    midi.connectionLost();
 }
 
 extern "C" void tuh_midi_rx_cb(uint8_t dev_addr, uint32_t num_packets)
