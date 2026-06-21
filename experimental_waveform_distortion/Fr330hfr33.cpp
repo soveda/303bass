@@ -1371,10 +1371,23 @@ uint8_t quantizedRandomNote(
 }
 
 void updateLeds(PlayMode mode, bool gate, bool accent, uint8_t note,
-    uint8_t filterPoles)
+    uint8_t filterPoles, uint8_t activePatternSlot,
+    uint16_t patternIndicatorTick)
 {
     card.setLed(0, mode == PlayMode::CvMidi ? 4095 : 0);
-    card.setLed(2, mode == PlayMode::Sequencer ? 4095 : 0);
+    // In sequencer mode LED 3 identifies the active pattern slot with one to
+    // four bright pulses. It remains dim between pulse groups so the mode
+    // indication is never lost.
+    uint16_t sequencerBrightness = 0;
+    if (mode == PlayMode::Sequencer) {
+        uint16_t phase = patternIndicatorTick % 200u;
+        uint16_t pulseIndex = phase / 22u;
+        uint16_t pulsePhase = phase % 22u;
+        bool pulseOn =
+            pulseIndex <= activePatternSlot && pulsePhase < 12u;
+        sequencerBrightness = pulseOn ? 4095 : 96;
+    }
+    card.setLed(2, sequencerBrightness);
     card.setLed(4, mode == PlayMode::Mute ? 4095 : 0);
     card.setLed(1, gate ? 4095 : 96);
     card.setLed(3, accent ? 4095 : 0);
@@ -1404,6 +1417,7 @@ void controlWorker()
     parameters.powerCut = 1;
 
     uint32_t lastPulse2Edges = 0;
+    uint16_t patternIndicatorTick = 0;
     uint64_t nextInternalStep = time_us_64();
     uint64_t lastExternalClockTime = 0;
     uint64_t lastSequencerStepTime = 0;
@@ -1852,8 +1866,10 @@ void controlWorker()
 
         if (++ledDivider >= 20) {
             ledDivider = 0;
+            ++patternIndicatorTick;
             updateLeds(mode, parameters.gate, parameters.accent,
-                parameters.midiNote, parameters.filterPoles);
+                parameters.midiNote, parameters.filterPoles,
+                midi.activePatternSlot, patternIndicatorTick);
         }
         sleep_us(500);
     }

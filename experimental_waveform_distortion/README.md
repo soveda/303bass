@@ -300,6 +300,9 @@ actually active, providing a hardware confirmation that the setting arrived.
 ## LEDs
 
 - LEDs 1, 3, and 5 indicate CV/MIDI, sequencer, and battery-pull modes
+- In sequencer mode, LED 3 gives one to four bright pulses for active pattern
+  slots 1–4, repeating approximately every two seconds; it remains dim between
+  pulse groups so the sequencer-mode indication stays visible
 - LED 2 follows the gate
 - LED 4 indicates accent
 - LED 6 varies with the current note
