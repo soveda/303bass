@@ -2,7 +2,9 @@
 #include "Fr330hfr33_LUT.h"
 
 #include "hardware/clocks.h"
+#include "hardware/flash.h"
 #include "hardware/sync.h"
+#include "hardware/regs/addressmap.h"
 #include "pico/multicore.h"
 #include "pico/time.h"
 #include "tusb.h"
@@ -20,6 +22,54 @@ constexpr uint32_t ControlPublishDivider = 48;
 constexpr int32_t PitchUnitsPerOctave = 4096;
 constexpr int32_t MinPitchUnits = -2 * PitchUnitsPerOctave;
 constexpr int32_t MaxPitchUnits = 8 * PitchUnitsPerOctave;
+constexpr uint32_t PersistenceMagic = 0x46333350u; // F33P
+constexpr uint16_t PersistenceVersion = 2;
+constexpr uint8_t PatternSlotCount = 4;
+constexpr uint32_t PersistenceFlashOffset =
+    (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE) &
+    ~(FLASH_SECTOR_SIZE - 1u);
+
+struct PatternSlot {
+    uint8_t length;
+    uint8_t initialStep;
+    uint8_t playbackMode;
+    uint8_t reserved;
+    uint8_t note[16];
+    uint8_t octave[16];
+    uint8_t accent[16];
+    uint8_t gate[16];
+    uint8_t tie[16];
+};
+
+struct PersistentState {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t size;
+    uint8_t scale;
+    uint8_t accentProbability;
+    uint8_t octaveSpan;
+    uint8_t rootNote;
+    uint16_t tempo;
+    uint8_t baseMidiNote;
+    uint8_t gateLength;
+    uint8_t glideProbability;
+    uint8_t midiChannel;
+    uint8_t midiClockSync;
+    uint8_t waveform;
+    uint8_t distortion;
+    uint8_t distortionAmount;
+    uint8_t distortionTone;
+    uint8_t filterPoles;
+    uint8_t acidness;
+    uint8_t patternEnabled;
+    uint8_t activeSlot;
+    uint8_t reserved;
+    PatternSlot slots[PatternSlotCount];
+    uint32_t checksum;
+};
+
+static_assert(sizeof(PersistentState) <= FLASH_SECTOR_SIZE,
+    "Persistent state must fit in one flash sector");
 
 constexpr std::array<uint16_t, 577> makeReciprocalQ15Table()
 {
@@ -75,6 +125,7 @@ struct AudioParameters {
     int32_t distortionKnee;
     int32_t ratToneQ15;
     int32_t tsTrebleQ8;
+    int32_t accentSweepMixQ15;
     uint8_t midiNote;
     uint8_t gate;
     uint8_t accent;
@@ -233,7 +284,38 @@ public:
             noteOn(data[0], data[1]);
         } else if (type == 0x80u || type == 0x90u) {
             noteOff(data[0]);
+        } else if (type == 0xB0u && hostInputMode &&
+            data[0] == 1u) {
+            // In USB host mode, MIDI CC1 (mod wheel) remotely controls the
+            // filter cutoff. Device mode deliberately leaves CC1 untouched.
+            cutoffCc1Value = data[1] & 0x7Fu;
+            cutoffCc1Active = true;
+            ++cutoffCc1SerialValue;
         }
+    }
+
+    void setHostInputMode(bool enabled)
+    {
+        hostInputMode = enabled;
+        if (!enabled && cutoffCc1Active) {
+            cutoffCc1Active = false;
+            ++cutoffCc1SerialValue;
+        }
+    }
+
+    bool cutoffCc1IsActive() const
+    {
+        return cutoffCc1Active;
+    }
+
+    uint8_t cutoffCc1() const
+    {
+        return cutoffCc1Value;
+    }
+
+    uint32_t cutoffCc1Serial() const
+    {
+        return cutoffCc1SerialValue;
     }
 
     void allNotesOff()
@@ -251,6 +333,10 @@ public:
         dataCount = 0;
         inSysex = false;
         sysexLength = 0;
+        if (cutoffCc1Active) {
+            cutoffCc1Active = false;
+            ++cutoffCc1SerialValue;
+        }
         ++disconnectSerialValue;
     }
 
@@ -314,6 +400,100 @@ public:
     uint8_t distortionAmount = 50;
     uint8_t distortionTone = 50;
     uint8_t filterPoles = 4;
+    uint8_t acidness = 50;
+    bool patternEnabled = false;
+    uint8_t patternLength = 16;
+    uint8_t patternInitialStep = 0;
+    bool patternReverse = false;
+    bool patternPendulum = false;
+    uint8_t activePatternSlot = 0;
+    uint32_t patternRevision = 0;
+    uint8_t patternNote[16] = {
+        0, 0, 7, 0, 3, 0, 10, 0, 0, 0, 7, 3, 0, 10, 7, 3
+    };
+    uint8_t patternOctave[16] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0
+    };
+    uint8_t patternAccent[16] = {
+        1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0
+    };
+    uint8_t patternGate[16] = {
+        60, 45, 60, 35, 60, 45, 60, 35,
+        60, 45, 60, 35, 60, 45, 60, 35
+    };
+    uint8_t patternTie[16] = {};
+
+    void loadPersistentState()
+    {
+        for (uint32_t i = 0; i < PatternSlotCount; ++i)
+            copyCurrentPatternTo(patternSlots[i]);
+        const PersistentState& state =
+            *reinterpret_cast<const PersistentState*>(
+                XIP_BASE + PersistenceFlashOffset);
+        if (!validPersistentState(state))
+            return;
+
+        scale = state.scale;
+        accentProbability = state.accentProbability;
+        octaveSpan = state.octaveSpan;
+        tempo = state.tempo;
+        rootNote = state.rootNote;
+        baseMidiNote = state.baseMidiNote;
+        gateLength = state.gateLength;
+        glideProbability = state.glideProbability;
+        midiChannel = state.midiChannel;
+        midiClockSync = state.midiClockSync != 0;
+        waveform = state.waveform;
+        distortion = state.distortion;
+        distortionAmount = state.distortionAmount;
+        distortionTone = state.distortionTone;
+        filterPoles = state.filterPoles;
+        acidness = state.acidness;
+        patternEnabled = state.patternEnabled != 0;
+        activePatternSlot =
+            state.activeSlot < PatternSlotCount ? state.activeSlot : 0;
+        for (uint32_t i = 0; i < PatternSlotCount; ++i)
+            patternSlots[i] = state.slots[i];
+        loadPatternSlot(activePatternSlot, false);
+    }
+
+    bool takePersistenceRequest()
+    {
+        bool requested = persistenceRequested;
+        persistenceRequested = false;
+        return requested;
+    }
+
+    void savePersistentStateIfChanged()
+    {
+        PersistentState state = currentPersistentState();
+        const PersistentState& saved =
+            *reinterpret_cast<const PersistentState*>(
+                XIP_BASE + PersistenceFlashOffset);
+        if (validPersistentState(saved) &&
+            persistentStatesMatch(state, saved))
+            return;
+
+        uint8_t page[FLASH_PAGE_SIZE];
+        const uint8_t* bytes =
+            reinterpret_cast<const uint8_t*>(&state);
+        uint32_t written = 0;
+        uint32_t interrupts = save_and_disable_interrupts();
+        flash_range_erase(PersistenceFlashOffset, FLASH_SECTOR_SIZE);
+        while (written < sizeof(PersistentState)) {
+            for (uint32_t i = 0; i < FLASH_PAGE_SIZE; ++i)
+                page[i] = 0xFF;
+            for (uint32_t i = 0;
+                i < FLASH_PAGE_SIZE &&
+                written + i < sizeof(PersistentState); ++i)
+                page[i] = bytes[written + i];
+            flash_range_program(
+                PersistenceFlashOffset + written,
+                page, FLASH_PAGE_SIZE);
+            written += FLASH_PAGE_SIZE;
+        }
+        restore_interrupts(interrupts);
+    }
 
 private:
     void noteOn(uint8_t nextNote, uint8_t nextVelocity)
@@ -361,16 +541,33 @@ private:
 
     void applySysex()
     {
-        // Educational/non-commercial manufacturer ID, "F303", command 1.
-        if ((sysexLength != 17 && sysexLength != 19 &&
-            sysexLength != 20 && sysexLength != 21 &&
-            sysexLength != 22) ||
+        // Educational/non-commercial manufacturer ID, "F303".
+        if (sysexLength < 6 ||
             sysex[0] != 0x7Du ||
             sysex[1] != 'F' ||
             sysex[2] != '3' ||
             sysex[3] != '0' ||
-            sysex[4] != '3' ||
-            sysex[5] != 0x01u)
+            sysex[4] != '3')
+            return;
+
+        if (sysex[5] == 0x02u) {
+            applyPatternSysex();
+            return;
+        }
+        if (sysex[5] == 0x03u) {
+            if (sysexLength == 7)
+                loadPatternSlot(sysex[6], true);
+            return;
+        }
+        if (sysex[5] == 0x04u) {
+            if (sysexLength == 7)
+                savePatternSlot(sysex[6]);
+            return;
+        }
+        if (sysex[5] != 0x01u ||
+            (sysexLength != 17 && sysexLength != 19 &&
+                sysexLength != 20 && sysexLength != 21 &&
+                sysexLength != 22 && sysexLength != 23))
             return;
 
         scale = sysex[6] > 5 ? 0 : sysex[6];
@@ -407,18 +604,178 @@ private:
             distortionTone = sysex[20] > 100 ? 100 : sysex[20];
         if (sysexLength >= 22)
             filterPoles = sysex[21] == 3 ? 3 : 4;
+        if (sysexLength >= 23)
+            acidness = sysex[22] > 100 ? 100 : sysex[22];
         if (!midiClockSync) {
             midiClockRunning = false;
             midiClockTicks = 0;
             pendingMidiSteps = 0;
         }
+        persistenceRequested = true;
+    }
+
+    void applyPatternSysex()
+    {
+        constexpr uint8_t PreviousPatternPayloadLength = 88;
+        constexpr uint8_t InitialStepPayloadLength = 89;
+        constexpr uint8_t PendulumPayloadLength = 91;
+        constexpr uint8_t PatternPayloadLength = 92;
+        if (sysexLength != PreviousPatternPayloadLength &&
+            sysexLength != InitialStepPayloadLength &&
+            sysexLength != 90 &&
+            sysexLength != PendulumPayloadLength &&
+            sysexLength != PatternPayloadLength)
+            return;
+
+        patternEnabled = sysex[6] != 0;
+        patternLength = clamp32(sysex[7], 1, 16);
+        for (uint32_t step = 0; step < 16; ++step) {
+            uint32_t offset = 8 + step * 5;
+            patternNote[step] = clamp32(sysex[offset], 0, 11);
+            patternOctave[step] = clamp32(sysex[offset + 1], 0, 3);
+            patternAccent[step] = sysex[offset + 2] != 0;
+            patternGate[step] =
+                clamp32(sysex[offset + 3], 10, 95);
+            patternTie[step] = sysex[offset + 4] != 0;
+        }
+        patternInitialStep = sysexLength >= InitialStepPayloadLength
+            ? clamp32(sysex[88], 0, 15)
+            : 0;
+        patternReverse = sysexLength >= 90
+            ? sysex[89] != 0
+            : false;
+        patternPendulum = sysexLength >= PendulumPayloadLength
+            ? sysex[90] != 0
+            : false;
+        if (sysexLength >= PatternPayloadLength)
+            activePatternSlot =
+                clamp32(sysex[91], 0, PatternSlotCount - 1);
+        ++patternRevision;
+        persistenceRequested = true;
+    }
+
+    void copyCurrentPatternTo(PatternSlot& slot)
+    {
+        slot.length = patternLength;
+        slot.initialStep = patternInitialStep;
+        slot.playbackMode =
+            patternPendulum ? 2 : (patternReverse ? 1 : 0);
+        slot.reserved = 0;
+        for (uint32_t i = 0; i < 16; ++i) {
+            slot.note[i] = patternNote[i];
+            slot.octave[i] = patternOctave[i];
+            slot.accent[i] = patternAccent[i];
+            slot.gate[i] = patternGate[i];
+            slot.tie[i] = patternTie[i];
+        }
+    }
+
+    void copyPatternFrom(const PatternSlot& slot)
+    {
+        patternLength = clamp32(slot.length, 1, 16);
+        patternInitialStep = clamp32(slot.initialStep, 0, 15);
+        patternReverse = slot.playbackMode == 1;
+        patternPendulum = slot.playbackMode == 2;
+        for (uint32_t i = 0; i < 16; ++i) {
+            patternNote[i] = clamp32(slot.note[i], 0, 11);
+            patternOctave[i] = clamp32(slot.octave[i], 0, 3);
+            patternAccent[i] = slot.accent[i] != 0;
+            patternGate[i] = clamp32(slot.gate[i], 10, 95);
+            patternTie[i] = slot.tie[i] != 0;
+        }
+        ++patternRevision;
+    }
+
+    void savePatternSlot(uint8_t slot)
+    {
+        if (slot >= PatternSlotCount)
+            return;
+        activePatternSlot = slot;
+        copyCurrentPatternTo(patternSlots[slot]);
+        persistenceRequested = true;
+    }
+
+    void loadPatternSlot(uint8_t slot, bool persistSelection)
+    {
+        if (slot >= PatternSlotCount)
+            return;
+        activePatternSlot = slot;
+        copyPatternFrom(patternSlots[slot]);
+        if (persistSelection)
+            persistenceRequested = true;
+    }
+
+    static uint32_t checksumPersistentState(
+        const PersistentState& state)
+    {
+        const uint8_t* bytes =
+            reinterpret_cast<const uint8_t*>(&state);
+        uint32_t checksum = 2166136261u;
+        for (uint32_t i = 0;
+            i < sizeof(PersistentState) - sizeof(uint32_t); ++i) {
+            checksum ^= bytes[i];
+            checksum *= 16777619u;
+        }
+        return checksum;
+    }
+
+    static bool validPersistentState(const PersistentState& state)
+    {
+        return state.magic == PersistenceMagic &&
+            state.version == PersistenceVersion &&
+            state.size == sizeof(PersistentState) &&
+            state.checksum == checksumPersistentState(state);
+    }
+
+    PersistentState currentPersistentState()
+    {
+        PersistentState state = {};
+        state.magic = PersistenceMagic;
+        state.version = PersistenceVersion;
+        state.size = sizeof(PersistentState);
+        state.scale = scale;
+        state.accentProbability = accentProbability;
+        state.octaveSpan = octaveSpan;
+        state.rootNote = rootNote;
+        state.tempo = tempo;
+        state.baseMidiNote = baseMidiNote;
+        state.gateLength = gateLength;
+        state.glideProbability = glideProbability;
+        state.midiChannel = midiChannel;
+        state.midiClockSync = midiClockSync;
+        state.waveform = waveform;
+        state.distortion = distortion;
+        state.distortionAmount = distortionAmount;
+        state.distortionTone = distortionTone;
+        state.filterPoles = filterPoles;
+        state.acidness = acidness;
+        state.patternEnabled = patternEnabled;
+        state.activeSlot = activePatternSlot;
+        for (uint32_t i = 0; i < PatternSlotCount; ++i)
+            state.slots[i] = patternSlots[i];
+        state.checksum = checksumPersistentState(state);
+        return state;
+    }
+
+    static bool persistentStatesMatch(
+        const PersistentState& a, const PersistentState& b)
+    {
+        const uint8_t* aBytes =
+            reinterpret_cast<const uint8_t*>(&a);
+        const uint8_t* bBytes =
+            reinterpret_cast<const uint8_t*>(&b);
+        for (uint32_t i = 0; i < sizeof(PersistentState); ++i) {
+            if (aBytes[i] != bBytes[i])
+                return false;
+        }
+        return true;
     }
 
     uint8_t runningStatus = 0;
     uint8_t data[2] = {};
     uint8_t dataCount = 0;
     bool inSysex = false;
-    uint8_t sysex[24] = {};
+    uint8_t sysex[96] = {};
     uint8_t sysexLength = 0;
     bool midiClockRunning = false;
     uint8_t midiClockTicks = 0;
@@ -431,6 +788,12 @@ private:
     uint32_t disconnectSerialValue = 0;
     uint32_t connectionSerialValue = 0;
     bool legatoSlide = false;
+    bool hostInputMode = false;
+    bool cutoffCc1Active = false;
+    uint8_t cutoffCc1Value = 0;
+    uint32_t cutoffCc1SerialValue = 0;
+    PatternSlot patternSlots[PatternSlotCount] = {};
+    bool persistenceRequested = false;
 };
 
 MidiParser midi;
@@ -476,6 +839,16 @@ public:
             // smoothly from its current level; only the filter contour needs
             // a hard restart for the acid articulation.
             filterEnvelope = 32767;
+            if (parameters.accent) {
+                // Model the charge delivered through the accent diode. Charge
+                // is additive rather than reset, so closely spaced accented
+                // notes start from the capacitor voltage left by the previous
+                // note and push the following sweep progressively higher.
+                int32_t chargeIncrement = 9000 +
+                    ((parameters.accentSweepMixQ15 * 5000) >> 15);
+                accentChargeQ15 = clamp32(
+                    accentChargeQ15 + chargeIncrement, 0, 32767);
+            }
         }
         lastEnvelopeTrigger = parameters.envelopeTrigger;
         lastGate = poweredGate;
@@ -515,6 +888,24 @@ public:
             filterStep = 1;
         filterEnvelope -= filterStep;
 
+        // The analogue accent capacitor drains continuously through its
+        // resistor. A second state follows the stored charge, with resonance
+        // (the other gang of the dual pot) changing a direct MEG-like hit into
+        // an increasingly smoothed capacitor-driven sweep.
+        int32_t chargeStep = (accentChargeQ15 * 3) >> 15;
+        if (chargeStep == 0 && accentChargeQ15 != 0)
+            chargeStep = 1;
+        accentChargeQ15 -= chargeStep;
+        int32_t accentAttackQ15 = 4096 -
+            ((parameters.accentSweepMixQ15 * 4064) >> 15);
+        int32_t accentDifference =
+            accentChargeQ15 - accentSweepQ15;
+        int32_t accentStep =
+            (accentDifference * accentAttackQ15) >> 15;
+        if (accentStep == 0 && accentDifference != 0)
+            accentStep = accentDifference > 0 ? 1 : -1;
+        accentSweepQ15 += accentStep;
+
         if (smoothedIncrement == 0)
             smoothedIncrement = parameters.phaseIncrement;
         int32_t pitchDifference =
@@ -546,12 +937,14 @@ public:
 
         int32_t dynamicCutoff = parameters.cutoffQ15 +
             ((filterEnvelope * parameters.filterEnvelopeQ15) >> 15);
-        if (parameters.accent) {
-            // Accent needs to remain obvious after the ladder's nonlinear
-            // stages. Push the filter contour substantially harder rather
-            // than relying on output gain alone.
-            dynamicCutoff += filterEnvelope >> 1;
-        }
+        int32_t directAccent = parameters.accent
+            ? filterEnvelope >> 1
+            : 0;
+        int32_t capacitorAccent = (accentSweepQ15 * 3) >> 2;
+        int32_t accentMix = parameters.accentSweepMixQ15;
+        dynamicCutoff +=
+            ((directAccent * (32767 - accentMix)) +
+                (capacitorAccent * accentMix)) >> 15;
         int32_t supplyAuthority = 8192 + ((supplyQ15 * 3) >> 2);
         dynamicCutoff = (dynamicCutoff * supplyAuthority) >> 15;
         dynamicCutoff = clamp32(dynamicCutoff, 96, 32200);
@@ -712,12 +1105,18 @@ private:
         // a unity-magnitude all-pass with twice the one-pole phase rotation.
         // Two normal stages follow four low-pass poles. Three-pole mode uses
         // one normal stage plus a second all-pass whose coefficient is mapped
-        // to half the normal stage's low-frequency group delay.
+        // to half the normal stage's low-frequency group delay. Unlike the
+        // previous average of two phase paths, both modes remain true
+        // unity-magnitude all-pass cascades and cannot cancel within the raw
+        // output itself.
         int32_t afterTwoPoles = processRawAllpassStage(
             input, cutoffQ15, rawAllpass[0]);
         int32_t afterFourPoles = processRawAllpassStage(
             afterTwoPoles, cutoffQ15, rawAllpass[1]);
 
+        // If g is the ladder coefficient, 2g/(1+g) gives an all-pass whose
+        // group delay at low frequencies approximates one ladder pole rather
+        // than two. The reciprocal table keeps division out of the ISR.
         int32_t fractionalCutoffQ15 =
             ((cutoffQ15 << 1) *
                 reciprocalQ15For(32768 + cutoffQ15)) >> 15;
@@ -751,9 +1150,15 @@ private:
 
         int32_t driven = (input * gainQ8) >> 8;
 
-        if (mode == 1)
+        if (mode == 1) {
+            // RAT-style experiment: symmetrical hard clipping. The rail falls
+            // slightly as drive rises, making the amount control increasingly
+            // compressed as well as more saturated.
             return clamp32(driven, -rail, rail);
+        }
         if (mode == 2) {
+            // Tube Screamer-style experiment: a broad soft knee. This models
+            // the clipping character, not the full pedal EQ.
             bool negative = driven < 0;
             int32_t magnitude = negative ? -driven : driven;
             if (magnitude > knee)
@@ -769,11 +1174,15 @@ private:
         int32_t ratCutoffQ15, int32_t tsTrebleGainQ8)
     {
         if (mode == 1) {
+            // RAT Filter approximation: post-clipping high-frequency roll-off.
+            // The Web control is presented conventionally, dark to bright.
             ratToneState +=
                 ((input - ratToneState) * ratCutoffQ15) >> 15;
             return ratToneState;
         }
         if (mode == 2) {
+            // Compact active three-band approximation: a fixed mid emphasis
+            // plus variable treble presence around that forward centre.
             constexpr int32_t BassCutoffQ15 = 1100;
             constexpr int32_t TrebleCutoffQ15 = 7200;
             tsBassState +=
@@ -811,6 +1220,9 @@ private:
 
     static int32_t diodePair(int32_t value)
     {
+        // Cheap piecewise approximation of an anti-parallel diode pair. It is
+        // linear around zero, bends progressively, and reaches its rail much
+        // more gradually than a transistor-style clipper.
         bool negative = value < 0;
         int32_t magnitude = negative ? -value : value;
         if (magnitude > 3072)
@@ -824,7 +1236,7 @@ private:
 
     AudioParameters parameters = {
         midiNoteToPhaseIncrement(BaseMidiNote), 0, -2000,
-        4096, 0, 128, 32767, 12000, 768, 1792, 960, 9600, 192,
+        4096, 0, 128, 32767, 12000, 768, 1792, 960, 9600, 192, 0,
         BaseMidiNote, 0, 0, 1, 0, 0, 4
     };
     uint32_t audioSlot = 0;
@@ -835,6 +1247,8 @@ private:
     uint32_t pulse2Edges = 0;
     int32_t envelope = 0;
     int32_t filterEnvelope = 0;
+    int32_t accentChargeQ15 = 0;
+    int32_t accentSweepQ15 = 0;
     int32_t supplyQ15 = 0;
     int32_t ladder[4] = {};
     int32_t rawAllpass[2] = {};
@@ -859,7 +1273,8 @@ uint32_t nextRandom()
 }
 
 uint8_t quantizedRandomNote(
-    uint8_t scale, uint8_t octaves, uint8_t root, uint8_t baseNote)
+    uint8_t scale, uint8_t octaves, uint8_t root, uint8_t baseNote,
+    uint8_t acidness)
 {
     static constexpr uint8_t MajorPentatonic[] = {0, 2, 4, 7, 9};
     static constexpr uint8_t MinorPentatonic[] = {0, 3, 5, 7, 10};
@@ -893,15 +1308,22 @@ uint8_t quantizedRandomNote(
     // Most steps move to a nearby scale degree, with occasional wider jumps.
     // Re-roll candidates found in the short history so small scales no longer
     // collapse into the same two- or three-note loop.
-    static constexpr int8_t Movements[16] = {
+    static constexpr int8_t RestrainedMovements[16] = {
+        -1, 0, 0, 1, 1, -1, 0, 1,
+        -2, 2, 0, 1, -1, 0, 2, -2
+    };
+    static constexpr int8_t AcidMovements[16] = {
         -2, -1, -1, 1, 1, 2, -2, 2,
         -3, 3, -1, 1, -4, 4, -2, 2
     };
     int32_t candidate = currentPosition;
     for (uint32_t attempt = 0; attempt < 8; ++attempt) {
         uint32_t value = nextRandom();
-        int32_t movement = Movements[value & 0x0Fu];
-        if ((value & 0x70u) == 0x70u)
+        bool acidMove = (value % 100u) < acidness;
+        int32_t movement = acidMove
+            ? AcidMovements[value & 0x0Fu]
+            : RestrainedMovements[value & 0x0Fu];
+        if (acidMove && (value & 0x70u) == 0x70u)
             movement += (value & 0x80u) ? degreeCount : -degreeCount;
 
         candidate = currentPosition + movement;
@@ -909,6 +1331,13 @@ uint8_t quantizedRandomNote(
             candidate += positionCount;
         while (candidate >= positionCount)
             candidate -= positionCount;
+
+        // Restrained settings deliberately allow repeated scale positions;
+        // high Acidness increasingly rejects them in favour of motion.
+        if (candidate == currentPosition &&
+            (nextRandom() % 100u) <
+                (uint32_t)(65 - (acidness * 55) / 100))
+            break;
 
         bool recent = candidate == currentPosition;
         for (uint32_t i = 0; i < 3; ++i)
@@ -942,13 +1371,28 @@ uint8_t quantizedRandomNote(
 }
 
 void updateLeds(PlayMode mode, bool gate, bool accent, uint8_t note,
-    uint8_t filterPoles)
+    uint8_t filterPoles, uint8_t activePatternSlot,
+    uint16_t patternIndicatorTick)
 {
     card.setLed(0, mode == PlayMode::CvMidi ? 4095 : 0);
-    card.setLed(2, mode == PlayMode::Sequencer ? 4095 : 0);
+    // In sequencer mode LED 3 identifies the active pattern slot with one to
+    // four bright pulses. It remains dim between pulse groups so the mode
+    // indication is never lost.
+    uint16_t sequencerBrightness = 0;
+    if (mode == PlayMode::Sequencer) {
+        uint16_t phase = patternIndicatorTick % 200u;
+        uint16_t pulseIndex = phase / 22u;
+        uint16_t pulsePhase = phase % 22u;
+        bool pulseOn =
+            pulseIndex <= activePatternSlot && pulsePhase < 12u;
+        sequencerBrightness = pulseOn ? 4095 : 96;
+    }
+    card.setLed(2, sequencerBrightness);
     card.setLed(4, mode == PlayMode::Mute ? 4095 : 0);
     card.setLed(1, gate ? 4095 : 96);
     card.setLed(3, accent ? 4095 : 0);
+    // A solid LED 6 is an unmistakable hardware confirmation that the
+    // experimental editor successfully selected three-pole mode.
     card.setLed(5, filterPoles == 3
         ? 4095
         : (uint16_t)(((uint32_t)(note & 0x0Fu) * 3072u) / 15u));
@@ -962,6 +1406,7 @@ void controlWorker()
         tuh_init(0);
     else
         tud_init(0);
+    midi.setHostInputMode(hostMode);
     bool deviceWasActive = false;
 
     HardwareSnapshot hardware = {};
@@ -972,6 +1417,7 @@ void controlWorker()
     parameters.powerCut = 1;
 
     uint32_t lastPulse2Edges = 0;
+    uint16_t patternIndicatorTick = 0;
     uint64_t nextInternalStep = time_us_64();
     uint64_t lastExternalClockTime = 0;
     uint64_t lastSequencerStepTime = 0;
@@ -986,11 +1432,22 @@ void controlWorker()
     uint8_t queuedNote = BaseMidiNote;
     bool queuedAccent = false;
     uint32_t sequenceTrigger = 0;
+    uint8_t patternStep = 0;
+    bool patternStarted = false;
+    bool lastPatternEnabled = false;
+    bool pendulumReverseDirection = false;
+    uint32_t lastPatternRevision = midi.patternRevision;
     uint32_t lastMidiDisconnectSerial = midi.disconnectSerial();
     uint32_t lastMidiConnectionSerial = midi.connectionSerial();
     uint32_t disconnectPulse1Edges = 0;
     bool midiDisconnectLock = false;
     uint32_t ledDivider = 0;
+    uint32_t lastCutoffCc1Serial = midi.cutoffCc1Serial();
+    bool cutoffCc1PickupActive = false;
+    bool cutoffPickupArmed = false;
+    int32_t cutoffCc1Knob = 0;
+    int32_t cutoffPickupStartKnob = 0;
+    int32_t cutoffPickupSide = 0;
 
     while (true) {
         if (hostMode) {
@@ -1003,12 +1460,18 @@ void controlWorker()
                 midi.connectionLost();
             else if (!deviceWasActive && deviceActive)
                 midi.connectionRestored();
+            // RP2040 TinyUSB forces VBUS present, so mounted and connected can
+            // remain true after cable removal. Loss of host frame traffic
+            // instead puts the device into USB suspend, which is the reliable
+            // device-mode indication that the DAW connection has disappeared.
             deviceWasActive = deviceActive;
             uint8_t bytes[64];
             uint32_t count = tud_midi_stream_read(bytes, sizeof(bytes));
             for (uint32_t i = 0; i < count; ++i)
                 midi.process(bytes[i]);
         }
+        if (midi.takePersistenceRequest())
+            midi.savePersistentStateIfChanged();
 
         readSnapshot(hardwareShared, hardware);
         PlayMode mode = hardware.switchPosition == (uint8_t)ComputerCard::Switch::Up
@@ -1021,13 +1484,58 @@ void controlWorker()
         int32_t xKnob = clamp32(hardware.xKnob, 0, 4095);
         int32_t yKnob = clamp32(hardware.yKnob, 0, 4095);
 
+        uint32_t cutoffCc1Serial = midi.cutoffCc1Serial();
+        if (cutoffCc1Serial != lastCutoffCc1Serial) {
+            lastCutoffCc1Serial = cutoffCc1Serial;
+            cutoffCc1PickupActive =
+                hostMode && midi.cutoffCc1IsActive();
+            if (cutoffCc1PickupActive) {
+                cutoffCc1Knob =
+                    ((int32_t)midi.cutoffCc1() * 4095 + 63) / 127;
+                cutoffPickupStartKnob = mainKnob;
+                cutoffPickupArmed = false;
+                cutoffPickupSide = mainKnob < cutoffCc1Knob
+                    ? -1
+                    : mainKnob > cutoffCc1Knob ? 1 : 0;
+            }
+        }
+
+        if (cutoffCc1PickupActive) {
+            int32_t moved = mainKnob - cutoffPickupStartKnob;
+            if (moved < 0)
+                moved = -moved;
+            if (moved >= 32)
+                cutoffPickupArmed = true;
+
+            int32_t distance = mainKnob - cutoffCc1Knob;
+            int32_t currentSide =
+                distance < 0 ? -1 : distance > 0 ? 1 : 0;
+            int32_t magnitude = distance < 0 ? -distance : distance;
+            if (cutoffPickupArmed &&
+                (magnitude <= 40 ||
+                    (cutoffPickupSide != 0 &&
+                        currentSide != cutoffPickupSide))) {
+                cutoffCc1PickupActive = false;
+            }
+        }
+
         // Hardware testing confirms Main already increases clockwise.
-        // A gently curved map keeps useful low tones while reaching a more
-        // genuinely open top end.
-        int32_t cutoffKnob = mainKnob;
+        // The ladder coefficient becomes perceptually open well before its
+        // numerical maximum, especially while the filter envelope is active.
+        // A fourth-power curve spreads that useful region across the full
+        // Main/CC1 travel while retaining the same fully-open endpoint.
+        int32_t cutoffKnob = cutoffCc1PickupActive
+            ? cutoffCc1Knob
+            : mainKnob;
+        int64_t cutoffSquared =
+            (int64_t)cutoffKnob * cutoffKnob;
         parameters.cutoffQ15 = 120 +
-            (int32_t)(((int64_t)cutoffKnob * cutoffKnob * 31800) >> 24);
+            (int32_t)((cutoffSquared * cutoffSquared * 31800) >> 48);
         if (midi.filterPoles == 3) {
+            // A third-order ladder naturally sounds subtler than the pole
+            // count suggests when compared at the same internal coefficient.
+            // Calibrate it to a higher effective cutoff so the 18 dB setting
+            // has an obvious, musically useful brighter response.
             parameters.cutoffQ15 +=
                 (parameters.cutoffQ15 >> 1) + 512;
             parameters.cutoffQ15 =
@@ -1035,7 +1543,8 @@ void controlWorker()
         }
 
         // Resonance uses a squared curve: most of X stays smooth and useful,
-        // with strong resonance and self-oscillation reserved for the top end.
+        // while the upper range now crosses the diode ladder's oscillation
+        // threshold instead of merely approaching it.
         int32_t resonanceMaximum =
             midi.filterPoles == 3 ? 35000 : 20500;
         parameters.resonanceQ12 =
@@ -1071,6 +1580,11 @@ void controlWorker()
             1200 + (int32_t)midi.distortionTone * 16800 / 100;
         parameters.tsTrebleQ8 =
             64 + (int32_t)midi.distortionTone * 256 / 100;
+        // The resonance pot emulates the second gang of the original accent
+        // sweep control: anti-clockwise favors the immediate envelope hit;
+        // clockwise increasingly exposes the capacitor's smoothed memory.
+        parameters.accentSweepMixQ15 =
+            (xKnob * 32767) / 4095;
 
         uint64_t now = time_us_64();
         uint32_t midiDisconnectSerial = midi.disconnectSerial();
@@ -1085,9 +1599,25 @@ void controlWorker()
             midiDisconnectLock = false;
         }
         if (midiDisconnectLock &&
-            hardware.pulse1Edges != disconnectPulse1Edges)
+            hardware.pulse1Edges != disconnectPulse1Edges) {
+            // A fresh physical gate edge explicitly hands control back to CV.
             midiDisconnectLock = false;
+        }
         if (mode == PlayMode::Sequencer) {
+            if (midi.patternEnabled != lastPatternEnabled ||
+                midi.patternRevision != lastPatternRevision) {
+                // Switching between programmed and generated playback starts
+                // the selected source cleanly. Re-applying a pattern likewise
+                // restarts it from its chosen Initial Step.
+                lastPatternEnabled = midi.patternEnabled;
+                lastPatternRevision = midi.patternRevision;
+                sequencePrepared = false;
+                queuedLegato = false;
+                sequenceGate = false;
+                patternStep = 0;
+                patternStarted = false;
+                pendulumReverseDirection = midi.patternReverse;
+            }
             bool externalClock = hardware.pulse2Edges != lastPulse2Edges;
             if (externalClock) {
                 lastPulse2Edges = hardware.pulse2Edges;
@@ -1117,12 +1647,91 @@ void controlWorker()
                     sequencerStepPeriod = stepPeriod;
                 }
                 lastSequencerStepTime = now;
-                if (!sequencePrepared) {
+
+                if (midi.patternEnabled) {
+                    uint8_t length =
+                        clamp32(midi.patternLength, 1, 16);
+                    uint8_t logicalStep =
+                        patternStep < length ? patternStep : 0;
+                    uint8_t initialStep =
+                        midi.patternInitialStep % length;
+                    uint8_t currentStep = 0;
+                    if (midi.patternPendulum) {
+                        if (!patternStarted) {
+                            patternStep = initialStep;
+                            logicalStep = initialStep;
+                        }
+                        currentStep = logicalStep;
+                    } else {
+                        currentStep = midi.patternReverse
+                            ? (uint8_t)(
+                                (initialStep + length - logicalStep) %
+                                    length)
+                            : (uint8_t)(
+                                (initialStep + logicalStep) % length);
+                    }
+                    bool legatoTransition =
+                        patternStarted && queuedLegato && sequenceGate;
+                    uint8_t previousNote = sequenceNote;
+                    int32_t programmedNote =
+                        (int32_t)midi.baseMidiNote +
+                        midi.rootNote +
+                        midi.patternNote[currentStep] +
+                        (int32_t)midi.patternOctave[currentStep] * 12;
+                    sequenceNote =
+                        (uint8_t)clamp32(programmedNote, 0, 127);
+                    sequenceAccent =
+                        midi.patternAccent[currentStep] != 0;
+                    sequenceGlide =
+                        legatoTransition &&
+                        sequenceNote != previousNote;
+                    if (!legatoTransition)
+                        ++sequenceTrigger;
+                    sequenceGate = true;
+                    gateOffTime = now +
+                        (sequencerStepPeriod *
+                            midi.patternGate[currentStep]) / 100u;
+                    // Tie belongs to the current step and carries its gate
+                    // into the following step. A pitch change becomes a slide;
+                    // an unchanged pitch becomes a true repeated-note tie.
+                    queuedLegato =
+                        midi.patternTie[currentStep] != 0;
+                    if (midi.patternPendulum && length > 1) {
+                        if (!pendulumReverseDirection) {
+                            if (logicalStep + 1u >= length) {
+                                pendulumReverseDirection = true;
+                                patternStep = length - 2u;
+                            } else {
+                                patternStep = logicalStep + 1u;
+                            }
+                        } else if (logicalStep == 0) {
+                            pendulumReverseDirection = false;
+                            patternStep = 1;
+                        } else {
+                            patternStep = logicalStep - 1u;
+                        }
+                    } else {
+                        patternStep =
+                            (uint8_t)((logicalStep + 1u) % length);
+                    }
+                    patternStarted = true;
+                    sequencePrepared = true;
+                } else if (!sequencePrepared) {
+                    // The first note starts normally. Later notes are prepared
+                    // one step early so the preceding gate can be held for a
+                    // real tie or slide.
                     sequenceNote = quantizedRandomNote(
                         midi.scale, clamp32(midi.octaveSpan, 1, 4),
-                        midi.rootNote, midi.baseMidiNote);
+                        midi.rootNote, midi.baseMidiNote,
+                        midi.acidness);
+                    uint8_t effectiveAccentProbability =
+                        (uint8_t)clamp32(
+                            ((int32_t)midi.accentProbability *
+                                (50 + midi.acidness)) / 100,
+                            0, 100);
                     sequenceAccent =
-                        (nextRandom() % 100u) < midi.accentProbability;
+                        (nextRandom() % 100u) <
+                            effectiveAccentProbability;
                     sequenceGlide = false;
                     sequencePrepared = true;
                     ++sequenceTrigger;
@@ -1131,27 +1740,58 @@ void controlWorker()
                     bool legatoTransition = queuedLegato && sequenceGate;
                     sequenceNote = queuedNote;
                     sequenceAccent = queuedAccent;
+                    // Repeated legato notes are true ties. Changed legato
+                    // notes keep the gate high and glide without retriggering
+                    // either envelope.
                     sequenceGlide =
                         legatoTransition && sequenceNote != previousNote;
                     if (!legatoTransition)
                         ++sequenceTrigger;
                 }
-                sequenceGate = true;
-                gateOffTime = now +
-                    (sequencerStepPeriod * midi.gateLength) / 100u;
-                queuedLegato =
-                    (nextRandom() % 100u) < midi.glideProbability;
-                bool queuedTie =
-                    queuedLegato && ((nextRandom() & 3u) == 0u);
-                queuedNote = queuedTie
-                    ? sequenceNote
-                    : quantizedRandomNote(
-                        midi.scale, clamp32(midi.octaveSpan, 1, 4),
-                        midi.rootNote, midi.baseMidiNote);
-                queuedAccent = queuedTie
-                    ? sequenceAccent
-                    : (nextRandom() % 100u) < midi.accentProbability;
+                if (!midi.patternEnabled) {
+                    uint8_t effectiveGateLength =
+                        (uint8_t)clamp32(
+                            (int32_t)midi.gateLength -
+                                ((int32_t)midi.acidness * 25) / 100,
+                            10, 95);
+                    sequenceGate = true;
+                    gateOffTime = now +
+                        (sequencerStepPeriod *
+                            effectiveGateLength) / 100u;
+
+                    // Glide Probability selects a transition into the next
+                    // generated step. Pattern mode instead reads its explicit
+                    // tie and gate lanes above.
+                    uint8_t effectiveGlideProbability =
+                        (uint8_t)clamp32(
+                            ((int32_t)midi.glideProbability *
+                                (50 + midi.acidness)) / 100,
+                            0, 100);
+                    queuedLegato =
+                        (nextRandom() % 100u) <
+                            effectiveGlideProbability;
+                    bool queuedTie =
+                        queuedLegato && ((nextRandom() & 3u) == 0u);
+                    queuedNote = queuedTie
+                        ? sequenceNote
+                        : quantizedRandomNote(
+                            midi.scale, clamp32(midi.octaveSpan, 1, 4),
+                            midi.rootNote, midi.baseMidiNote,
+                            midi.acidness);
+                    uint8_t effectiveAccentProbability =
+                        (uint8_t)clamp32(
+                            ((int32_t)midi.accentProbability *
+                                (50 + midi.acidness)) / 100,
+                            0, 100);
+                    queuedAccent = queuedTie
+                        ? sequenceAccent
+                        : (nextRandom() % 100u) <
+                            effectiveAccentProbability;
+                }
             }
+            // A prepared legato transition suppresses note-off so the gate
+            // remains high across the next step boundary. Ordinary steps
+            // still use the configured gate percentage.
             if (sequenceGate && !queuedLegato && now >= gateOffTime)
                 sequenceGate = false;
 
@@ -1169,6 +1809,9 @@ void controlWorker()
             sequencePrepared = false;
             queuedLegato = false;
             sequenceGate = false;
+            patternStep = 0;
+            patternStarted = false;
+            pendulumReverseDirection = midi.patternReverse;
             bool forceSlide = hardware.pulse2High;
             if (midi.gate) {
                 parameters.midiNote = midi.note;
@@ -1208,8 +1851,14 @@ void controlWorker()
             sequencePrepared = false;
             queuedLegato = false;
             sequenceGate = false;
+            patternStep = 0;
+            patternStarted = false;
+            pendulumReverseDirection = midi.patternReverse;
             parameters.gate = 0;
             parameters.accent = 0;
+            // Preserve the last articulation serial. Resetting it here looks
+            // like a new trigger to the audio core and clears the held VCA
+            // level, turning the battery-pull effect into an immediate mute.
             parameters.powerCut = 1;
         }
 
@@ -1217,8 +1866,10 @@ void controlWorker()
 
         if (++ledDivider >= 20) {
             ledDivider = 0;
+            ++patternIndicatorTick;
             updateLeds(mode, parameters.gate, parameters.accent,
-                parameters.midiNote, parameters.filterPoles);
+                parameters.midiNote, parameters.filterPoles,
+                midi.activePatternSlot, patternIndicatorTick);
         }
         sleep_us(500);
     }
@@ -1228,11 +1879,15 @@ void controlWorker()
 
 extern "C" void tud_mount_cb(void)
 {
+    // TinyUSB's device callback is the authoritative indication that a DAW
+    // connection has returned. Polling alone can miss short USB transitions.
     midi.connectionRestored();
 }
 
 extern "C" void tud_umount_cb(void)
 {
+    // Release held MIDI state at the USB event itself. The control worker
+    // observes the serial change and latches its output gate low.
     midi.connectionLost();
 }
 
@@ -1284,6 +1939,7 @@ int main()
 #if defined(FR330HFR33_OVERCLOCK_KHZ) && FR330HFR33_OVERCLOCK_KHZ
     set_sys_clock_khz(FR330HFR33_OVERCLOCK_KHZ, true);
 #endif
+    midi.loadPersistentState();
     multicore_launch_core1(controlWorker);
     card.Run();
 }
