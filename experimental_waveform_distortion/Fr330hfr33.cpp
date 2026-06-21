@@ -1392,7 +1392,7 @@ void updateLeds(PlayMode mode, bool gate, bool accent, uint8_t note,
     card.setLed(1, gate ? 4095 : 96);
     card.setLed(3, accent ? 4095 : 0);
     // A solid LED 6 is an unmistakable hardware confirmation that the
-    // experimental editor successfully selected three-pole mode.
+    // editor successfully selected three-pole mode.
     card.setLed(5, filterPoles == 3
         ? 4095
         : (uint16_t)(((uint32_t)(note & 0x0Fu) * 3072u) / 15u));

@@ -1,7 +1,6 @@
 # Fr330hfr33 Experimental Web MIDI Protocol
 
-This records the SysEx protocol shared by the experimental firmware and Web
-MIDI editor.
+This records the SysEx protocol shared by the firmware and Web MIDI editor.
 
 ## Message layout
 
@@ -91,11 +90,11 @@ The firmware accepts these internal SysEx lengths:
 | 17 | Base MIDI note; release-candidate editor |
 | 19 | Distortion mode |
 | 20 | Distortion amount |
-| 21 | Distortion tone; previous experimental editor |
-| 22 | Diode filter pole count; current experimental editor |
+| 21 | Distortion tone |
+| 22 | Diode filter pole count |
 | 23 | Acidness |
 
-Missing experimental fields retain their current/default values:
+Missing optional fields retain their current/default values:
 
 - Waveform: saw
 - Distortion: off
@@ -107,7 +106,7 @@ Invalid values are clamped or replaced with safe defaults.
 
 ## Maintenance notes
 
-Command `01` retains the release-candidate configuration prefix. If a future
+Command `01` retains its original configuration prefix. If a future
 change alters existing field meanings or ordering, use a new command byte
 rather than reinterpreting command `01`.
 

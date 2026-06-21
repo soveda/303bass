@@ -13,6 +13,12 @@ Version `0.9.1`:
 uf2/Fr330hfr33-v0.9.1.uf2
 ```
 
+SHA-256:
+
+```text
+aff2cc66575f2d9bfd661f6b7106e63f905338911620f1fbb5e1067afaf63efa
+```
+
 The release has passed functional, USB disconnect/reconnect, persistence,
 extended-running, and processor-stress hardware tests.
 

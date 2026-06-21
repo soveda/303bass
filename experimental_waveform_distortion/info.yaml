@@ -1,8 +1,8 @@
 id: Fr330hfr33
 title: Fr330hfr33 Experimental
-release: Experimental waveform/distortion
-summary: Experimental diode-filter acid voice with selectable oscillator and distortion
-description: Experimental fixed-point acid bass synthesiser with a switchable three- or four-pole diode-style resonant ladder, Web MIDI-selectable saw or square oscillator, and RAT-style or Tube Screamer-style distortion.
+release: 0.9.1 experimental baseline
+summary: Experimental workspace based on the hardware-tested 0.9.1 release
+description: Independently buildable experimental workspace containing the tested 0.9.1 implementation and reserved for future hardware-tested changes.
 panel:
   controls:
     main:
@@ -118,7 +118,8 @@ leds:
   - "LEDs 1, 3, and 5 indicate switch-up CV/MIDI mode, switch-middle sequencer mode, and switch-down battery-pull mode respectively."
   - "LED 2 follows the current gate, with a dim idle level."
   - "LED 4 indicates accented notes."
-  - "LED 6 displays the low four bits of the current MIDI note as brightness."
+  - "In sequencer mode LED 3 pulses one to four times to identify the active pattern slot."
+  - "LED 6 displays note brightness, or stays fully lit in 18 dB three-pole mode."
 notes:
   - "The Web MIDI editor configures major pentatonic, minor pentatonic, Ionian, Lydian, ascending melodic minor, or chromatic scale plus root note, base octave, accent probability, sequencer octave span, gate length, legato-transition probability, MIDI input channel, internal tempo, and MIDI clock sync."
   - "The editor can enable a 1-16 step pattern with separate note, octave, accent, gate, and tie lanes; each lane can be randomized independently, and note randomization uses the currently selected scale."
@@ -128,22 +129,22 @@ notes:
   - "Acidness coordinates generator interval size, octave jumps, gate length, accent density, and legato density; Acidify Pattern applies the same musical profile to the editable lanes using the selected scale."
   - "In USB host mode, incoming MIDI CC1 controls filter cutoff; the physical Main knob resumes control only after crossing the current CC1 position."
   - "Sequencer legato transitions are prepared one step ahead so the gate remains high: most selected transitions slide to a new pitch without retriggering, while one quarter become true repeated-note ties."
-  - "Experimental accent reserves output headroom, applies a 62.5% level lift, and adds a stronger short contour-shaped bright component so accented notes remain distinct near maximum cutoff and through distortion."
-  - "The experimental accent sweep has capacitor memory: rapid accented notes accumulate charge and push successive cutoff sweeps higher, while resonance crossfades from the direct contour toward the smoother stored charge."
+  - "Accent reserves output headroom, applies a 62.5% level lift, and adds a short bright contour so accented notes remain distinct near maximum cutoff and through distortion."
+  - "The accent sweep has capacitor memory: rapid accented notes accumulate charge and push successive cutoff sweeps higher, while resonance crossfades from the direct contour toward the smoother stored charge."
   - "MIDI device or host disconnection latches the gate low until USB reconnects or a fresh physical gate edge explicitly hands control back to CV."
   - "LED 6 is fully lit in 18 dB three-pole mode, confirming that the experimental editor setting reached the hardware."
   - "Hardware testing confirms that RAT-style and Tube Screamer-style clipping sound clearly different with the saw but can sound similar with the square. The square is already a two-level, rail-shaped waveform, so additional symmetrical clipping changes its level more than its shape; both tone controls remain active."
   - "The default sequencer base is MIDI note 36 (C2); the editor can select C1, C2, C3, or C4 before root-note transposition."
   - "The note generator remembers recent scale positions to reduce repetition while retaining occasional melodic and octave jumps."
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."
-  - "Editor settings apply to the running session and currently return to defaults after reset."
+  - "Editor settings and four pattern slots persist across power cycles."
   - "MIDI velocity 112-127 produces an accent."
   - "Each articulated note fires a decaying filter contour; accent pushes that contour much harder and adds post-filter gain for a brighter, louder, punchier note."
   - "USB MIDI automatically operates as a device or host according to the Workshop Computer USB power role."
   - "Monophonic MIDI uses last-note priority and clears held notes when USB disconnects."
   - "In CV/MIDI mode, Pulse In 2 high enables manual glide. MIDI note overlaps also create automatic legato glide while keeping the gate and envelope open."
   - "The firmware runs the RP2040 at 192 MHz, copies the complete binary to RAM, and keeps division, locks, waits, USB work, and software 64-bit multiplication out of the audio callback."
-  - "This is a WIP build awaiting full hardware profiling and musical tuning."
+  - "Version 0.9.1 passed functional, disconnect/reconnect, persistence, long-running, and processor-stress hardware testing."
 source:
   - Fr330hfr33.cpp
   - Fr330hfr33_LUT.cpp
@@ -186,6 +187,6 @@ source_file: data/cards/Fr330hfr33.yml
 metadata:
   creator: Adrian Vos
   language: Pico SDK
-  version: 0.9.0-rc1
-  status: Release Candidate
+  version: 0.9.1
+  status: Experimental
   editor_url: web_config/Fr330hfr33.html
