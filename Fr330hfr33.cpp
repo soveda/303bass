@@ -284,6 +284,11 @@ public:
             noteOn(data[0], data[1]);
         } else if (type == 0x80u || type == 0x90u) {
             noteOff(data[0]);
+        } else if (type == 0xE0u) {
+            // Standard 14-bit pitch-bend wheel: data[0] is the low seven bits,
+            // data[1] the high seven bits, and 8192 is the centre position.
+            pitchBend = ((int32_t)data[1] << 7) | data[0];
+            pitchBend -= 8192;
         } else if (type == 0xB0u && hostInputMode &&
             data[0] == 1u) {
             // In USB host mode, MIDI CC1 (mod wheel) remotely controls the
@@ -318,6 +323,20 @@ public:
         return cutoffCc1SerialValue;
     }
 
+    int32_t pitchBendUnits() const
+    {
+        // Use the conventional fixed bend range of two semitones. Pitch units
+        // are 4096 per octave, so this retains sub-cent resolution.
+        int32_t divisor = pitchBend >= 0 ? 8191 : 8192;
+        int64_t numerator =
+            (int64_t)pitchBend * 2 * PitchUnitsPerOctave;
+        int64_t denominator = (int64_t)12 * divisor;
+        numerator += numerator >= 0
+            ? denominator / 2
+            : -(denominator / 2);
+        return (int32_t)(numerator / denominator);
+    }
+
     void allNotesOff()
     {
         for (uint32_t i = 0; i < 128; ++i)
@@ -337,6 +356,7 @@ public:
             cutoffCc1Active = false;
             ++cutoffCc1SerialValue;
         }
+        pitchBend = 0;
         ++disconnectSerialValue;
     }
 
@@ -792,6 +812,7 @@ private:
     bool cutoffCc1Active = false;
     uint8_t cutoffCc1Value = 0;
     uint32_t cutoffCc1SerialValue = 0;
+    int32_t pitchBend = 0;
     PatternSlot patternSlots[PatternSlotCount] = {};
     bool persistenceRequested = false;
 };
@@ -1814,10 +1835,16 @@ void controlWorker()
             pendulumReverseDirection = midi.patternReverse;
             bool forceSlide = hardware.pulse2High;
             if (midi.gate) {
+                int32_t midiPitchUnits =
+                    ((int32_t)midi.note - BaseMidiNote) *
+                    PitchUnitsPerOctave / 12 +
+                    midi.pitchBendUnits();
                 parameters.midiNote = midi.note;
-                parameters.phaseIncrement = midiNoteToPhaseIncrement(midi.note);
+                parameters.phaseIncrement =
+                    pitchUnitsToPhaseIncrement(midiPitchUnits);
                 parameters.pitchMillivolts =
-                    ((int32_t)midi.note - 60) * 1000 / 12;
+                    -2000 +
+                    (midiPitchUnits * 1000) / PitchUnitsPerOctave;
                 parameters.gate = 1;
                 parameters.accent = midi.velocity >= 112;
                 parameters.glideQ15 =

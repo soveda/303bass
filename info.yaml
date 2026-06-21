@@ -142,6 +142,7 @@ notes:
   - "Each articulated note fires a decaying filter contour; accent pushes that contour much harder and adds post-filter gain for a brighter, louder, punchier note."
   - "USB MIDI automatically operates as a device or host according to the Workshop Computer USB power role."
   - "Monophonic MIDI uses last-note priority and clears held notes when USB disconnects."
+  - "Standard 14-bit MIDI pitch bend provides a fixed plus or minus two-semitone range and is reflected by both the audio voice and calibrated pitch CV output."
   - "In CV/MIDI mode, Pulse In 2 high enables manual glide. MIDI note overlaps also create automatic legato glide while keeping the gate and envelope open."
   - "The firmware runs the RP2040 at 192 MHz, copies the complete binary to RAM, and keeps division, locks, waits, USB work, and software 64-bit multiplication out of the audio callback."
   - "Version 0.9.1 passed functional, disconnect/reconnect, persistence, long-running, and processor-stress hardware testing."

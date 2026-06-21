@@ -46,6 +46,7 @@ more pronounced slides.
 - `Pulse In 2` high: manual glide
 - USB MIDI notes take priority while held
 - MIDI velocity 112–127 triggers accent
+- The MIDI pitch-bend wheel bends the voice and Pitch CV Out by ±2 semitones
 
 Overlapping MIDI notes create 303-style legato slides without retriggering the
 envelope. The most recently played held note has priority.
@@ -54,9 +55,10 @@ Accent makes the note louder and brighter. Closely spaced accents accumulate
 filter-sweep energy, so a run of accents can rise higher than an isolated
 accent.
 
-In USB host mode, MIDI CC1 controls cutoff. The Main knob uses pickup: it
-resumes control only after crossing the current CC1 position, avoiding a jump.
-CC1 does not control cutoff in USB device mode.
+In USB host mode, MIDI CC1—usually sent by a MIDI controller's mod wheel—
+controls cutoff. The Main knob uses pickup: it resumes control only after
+crossing the current CC1 position, avoiding a jump. CC1 does not control cutoff
+in USB device mode.
 
 If USB MIDI is interrupted, held MIDI state is cleared and the gate closes.
 USB reconnection or a new physical gate restores normal control.
