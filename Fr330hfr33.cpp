@@ -21,9 +21,9 @@ constexpr int32_t PitchUnitsPerOctave = 4096;
 constexpr int32_t MinPitchUnits = -2 * PitchUnitsPerOctave;
 constexpr int32_t MaxPitchUnits = 8 * PitchUnitsPerOctave;
 
-constexpr std::array<uint16_t, 257> makeReciprocalQ15Table()
+constexpr std::array<uint16_t, 577> makeReciprocalQ15Table()
 {
-    std::array<uint16_t, 257> table = {};
+    std::array<uint16_t, 577> table = {};
     for (uint32_t i = 0; i < table.size(); ++i) {
         uint32_t denominatorQ15 = 32768u + i * 512u;
         table[i] = (uint16_t)((1u << 30) / denominatorQ15);
@@ -70,10 +70,18 @@ struct AudioParameters {
     int32_t envelopeDecayQ15;
     int32_t glideQ15;
     int32_t filterEnvelopeQ15;
+    int32_t distortionGainQ8;
+    int32_t distortionRail;
+    int32_t distortionKnee;
+    int32_t ratToneQ15;
+    int32_t tsTrebleQ8;
     uint8_t midiNote;
     uint8_t gate;
     uint8_t accent;
     uint8_t powerCut;
+    uint8_t waveform;
+    uint8_t distortion;
+    uint8_t filterPoles;
 };
 
 template <typename T>
@@ -236,6 +244,31 @@ public:
         legatoSlide = false;
     }
 
+    void connectionLost()
+    {
+        allNotesOff();
+        runningStatus = 0;
+        dataCount = 0;
+        inSysex = false;
+        sysexLength = 0;
+        ++disconnectSerialValue;
+    }
+
+    uint32_t disconnectSerial() const
+    {
+        return disconnectSerialValue;
+    }
+
+    void connectionRestored()
+    {
+        ++connectionSerialValue;
+    }
+
+    uint32_t connectionSerial() const
+    {
+        return connectionSerialValue;
+    }
+
     bool takeClockStep()
     {
         if (pendingMidiSteps == 0)
@@ -266,7 +299,7 @@ public:
 
     // Web editor settings. The SysEx payload keeps these in a stable order:
     // scale, accent, span, tempo LSB/MSB, root, gate, glide, channel,
-    // MIDI sync, and base octave.
+    // MIDI sync, base octave, waveform, distortion, drive, tone, and poles.
     uint8_t scale = 0;
     uint8_t accentProbability = 32;
     uint8_t octaveSpan = 2;
@@ -276,6 +309,11 @@ public:
     uint8_t gateLength = 60;
     uint8_t glideProbability = 35;
     bool midiClockSync = false;
+    uint8_t waveform = 0;
+    uint8_t distortion = 0;
+    uint8_t distortionAmount = 50;
+    uint8_t distortionTone = 50;
+    uint8_t filterPoles = 4;
 
 private:
     void noteOn(uint8_t nextNote, uint8_t nextVelocity)
@@ -324,7 +362,9 @@ private:
     void applySysex()
     {
         // Educational/non-commercial manufacturer ID, "F303", command 1.
-        if (sysexLength != 17 ||
+        if ((sysexLength != 17 && sysexLength != 19 &&
+            sysexLength != 20 && sysexLength != 21 &&
+            sysexLength != 22) ||
             sysex[0] != 0x7Du ||
             sysex[1] != 'F' ||
             sysex[2] != '3' ||
@@ -357,6 +397,16 @@ private:
             baseMidiNote = BaseMidiNote;
             break;
         }
+        if (sysexLength >= 19) {
+            waveform = sysex[17] > 1 ? 0 : sysex[17];
+            distortion = sysex[18] > 2 ? 0 : sysex[18];
+        }
+        if (sysexLength >= 20)
+            distortionAmount = sysex[19] > 100 ? 100 : sysex[19];
+        if (sysexLength >= 21)
+            distortionTone = sysex[20] > 100 ? 100 : sysex[20];
+        if (sysexLength >= 22)
+            filterPoles = sysex[21] == 3 ? 3 : 4;
         if (!midiClockSync) {
             midiClockRunning = false;
             midiClockTicks = 0;
@@ -368,7 +418,7 @@ private:
     uint8_t data[2] = {};
     uint8_t dataCount = 0;
     bool inSysex = false;
-    uint8_t sysex[20] = {};
+    uint8_t sysex[24] = {};
     uint8_t sysexLength = 0;
     bool midiClockRunning = false;
     uint8_t midiClockTicks = 0;
@@ -378,6 +428,8 @@ private:
     uint32_t heldOrder[128] = {};
     uint32_t noteOrder = 0;
     uint32_t articulationSerial = 0;
+    uint32_t disconnectSerialValue = 0;
+    uint32_t connectionSerialValue = 0;
     bool legatoSlide = false;
 };
 
@@ -419,7 +471,10 @@ public:
         bool explicitTrigger = parameters.envelopeTrigger != lastEnvelopeTrigger;
         bool noteTrigger = (poweredGate && !lastGate) || explicitTrigger;
         if (noteTrigger) {
-            envelope = 0;
+            // Restarting the VCA from literal zero can create a discontinuity
+            // when the previous note has not fully released. Let it attack
+            // smoothly from its current level; only the filter contour needs
+            // a hard restart for the acid articulation.
             filterEnvelope = 32767;
         }
         lastEnvelopeTrigger = parameters.envelopeTrigger;
@@ -432,9 +487,15 @@ public:
         // solely responsible for fading the voice to silence.
         if (!parameters.powerCut) {
             const int32_t envelopeTarget = poweredGate ? 32767 : 0;
-            int32_t envelopeCoefficient = poweredGate
-                ? 6144
-                : parameters.envelopeDecayQ15;
+            // Keep note-off release no faster than roughly 20 ms. Y still
+            // reaches its full longer-release range, while the separate
+            // filter contour retains its original fast decay range.
+            constexpr int32_t FastestReleaseQ15 = 34;
+            int32_t releaseCoefficient = parameters.envelopeDecayQ15;
+            if (releaseCoefficient > FastestReleaseQ15)
+                releaseCoefficient = FastestReleaseQ15;
+            int32_t envelopeCoefficient =
+                poweredGate ? 6144 : releaseCoefficient;
             int32_t envelopeDelta = envelopeTarget - envelope;
             int32_t envelopeStep =
                 (envelopeDelta * envelopeCoefficient) >> 15;
@@ -479,6 +540,9 @@ public:
         int32_t a = Fr330hfr33SawLut[tableIndex];
         int32_t b = Fr330hfr33SawLut[tableIndex + 1u];
         int32_t saw = a + (((b - a) * (int32_t)fraction) >> 12);
+        int32_t oscillator = parameters.waveform
+            ? ((phase & 0x80000000u) ? 2047 : -2048)
+            : saw;
 
         int32_t dynamicCutoff = parameters.cutoffQ15 +
             ((filterEnvelope * parameters.filterEnvelopeQ15) >> 15);
@@ -494,24 +558,45 @@ public:
 
         int32_t poweredResonance =
             (parameters.resonanceQ12 * supplyAuthority) >> 15;
-        int32_t filtered = processLadder(saw, dynamicCutoff,
-            poweredResonance);
+        int32_t filtered = processDiodeLadder(oscillator, dynamicCutoff,
+            poweredResonance, parameters.filterPoles);
         int32_t resonanceMakeupQ15 =
-            32768 + ((poweredResonance * 3) >> 1);
+            32768 + poweredResonance;
         filtered = (filtered * resonanceMakeupQ15) >> 15;
+        if (parameters.accent) {
+            // Add a short, contour-shaped amount of the oscillator back into
+            // the filtered signal. This preserves an obvious bright accent
+            // even when cutoff is already near its ceiling, where another
+            // cutoff increase would be inaudible.
+            int32_t accentBrightnessQ15 =
+                (filterEnvelope >> 2) + (filterEnvelope >> 3);
+            filtered +=
+                ((oscillator - filtered) * accentBrightnessQ15) >> 15;
+        }
+        filtered = processDistortion(filtered, parameters.distortion,
+            parameters.distortionGainQ8, parameters.distortionRail,
+            parameters.distortionKnee);
+        filtered = processDistortionTone(filtered, parameters.distortion,
+            parameters.ratToneQ15, parameters.tsTrebleQ8);
         int32_t amplitude = envelope;
 
         int32_t voice = (filtered * amplitude) >> 15;
+        // Leave output headroom so the accent level change survives the final
+        // 12-bit output clamp instead of both accented and normal notes
+        // flattening at the same rail.
+        voice -= voice >> 2;
         if (parameters.accent)
-            voice += voice >> 2;
+            voice += (voice >> 1) + (voice >> 3);
         voice = (voice * supplyQ15) >> 15;
         // A four-pole low-pass rotates the signal phase even though both
         // outputs originate from the same oscillator sample. Two first-order
         // all-pass stages track that rotation without changing the raw saw's
         // magnitude response, so blending both outputs no longer creates the
         // pronounced parallel-filter cancellation heard in an external mixer.
-        int32_t phaseAlignedSaw = processRawAllpass(saw, dynamicCutoff);
-        int32_t raw = (phaseAlignedSaw * supplyQ15) >> 15;
+        int32_t phaseAlignedOscillator =
+            processRawAllpass(oscillator, dynamicCutoff,
+                parameters.filterPoles);
+        int32_t raw = (phaseAlignedOscillator * supplyQ15) >> 15;
         AudioOut1((int16_t)clamp32(voice, -2048, 2047));
         AudioOut2((int16_t)clamp32(raw, -2048, 2047));
         CVOut1Millivolts(
@@ -563,68 +648,155 @@ private:
         }
     }
 
-    int32_t processLadder(int32_t input, int32_t cutoffQ15,
-        int32_t resonanceQ12)
+    int32_t processDiodeLadder(int32_t input, int32_t cutoffQ15,
+        int32_t resonanceQ12, uint8_t poles)
     {
-        // Four trapezoidal-integrator one-poles form a TPT ladder. Each stage
-        // is affine in the ladder input, which lets us solve the global
-        // feedback path without iteration or division in the audio interrupt.
+        // Three or four trapezoidal-integrator one-poles form a diode-style
+        // ladder. Each mode solves its own global feedback path without
+        // iteration or division in the ISR.
+        uint32_t feedbackStages = poles == 3 ? 3u : 4u;
         int32_t oneMinusG = 32768 - cutoffQ15;
         int32_t constant = (oneMinusG * ladder[0]) >> 15;
         constant = ((cutoffQ15 * constant) >> 15) +
             ((oneMinusG * ladder[1]) >> 15);
         constant = ((cutoffQ15 * constant) >> 15) +
             ((oneMinusG * ladder[2]) >> 15);
-        constant = ((cutoffQ15 * constant) >> 15) +
-            ((oneMinusG * ladder[3]) >> 15);
+        if (feedbackStages == 4) {
+            constant = ((cutoffQ15 * constant) >> 15) +
+                ((oneMinusG * ladder[3]) >> 15);
+        }
 
         int32_t g2 = (cutoffQ15 * cutoffQ15) >> 15;
-        int32_t g4 = (g2 * g2) >> 15;
+        int32_t gN = feedbackStages == 3
+            ? (g2 * cutoffQ15) >> 15
+            : (g2 * g2) >> 15;
         int32_t denominatorQ15 =
-            32768 + ((resonanceQ12 * g4) >> 12);
+            32768 + ((resonanceQ12 * gN) >> 12);
         int32_t reciprocalQ15 = reciprocalQ15For(denominatorQ15);
         int32_t driven = input -
             ((resonanceQ12 * constant) >> 12);
         driven = (driven * reciprocalQ15) >> 15;
-        driven = softClip(driveInput(driven));
+        driven = diodePair(driveInput(driven));
 
+        int32_t selectedOutput = 0;
+        int32_t fourthPoleOutput = 0;
         for (uint32_t i = 0; i < 4; ++i) {
             int32_t delta = driven - ladder[i];
             int32_t integrator = (delta * cutoffQ15) >> 15;
             int32_t output = integrator + ladder[i];
-            ladder[i] = softClip(output + integrator);
+            // Paired-diode conduction has a broad knee rather than the early,
+            // flat rail used by the previous transistor-like stage clip. This
+            // leaves enough loop gain for a healthy sine at high resonance.
+            ladder[i] = diodePair(output + integrator);
             driven = output;
+            if (i + 1u == feedbackStages)
+                selectedOutput = output;
+            if (i == 3)
+                fourthPoleOutput = output;
         }
-        return softClip(driven);
+
+        if (feedbackStages == 3) {
+            // Keep the true third-pole output dominant, then emphasize the
+            // spectrum that the tracked fourth pole would have removed. The
+            // asymptotic response remains third order, but the audible
+            // contrast with 24 dB mode is much clearer on bass waveforms.
+            selectedOutput += (selectedOutput - fourthPoleOutput) >> 1;
+        }
+        return diodePair(selectedOutput);
     }
 
-    int32_t processRawAllpass(int32_t input, int32_t cutoffQ15)
+    int32_t processRawAllpass(int32_t input, int32_t cutoffQ15,
+        uint8_t poles)
     {
         // For the TPT one-pole used by the ladder, (2 * low-pass) - input is
         // a unity-magnitude all-pass with twice the one-pole phase rotation.
-        // Cascading two stages therefore follows the phase of four low-pass
-        // poles while leaving the oscillator spectrum unfiltered.
-        for (uint32_t i = 0; i < 2; ++i) {
-            int32_t delta = input - rawAllpass[i];
-            int32_t product = delta * cutoffQ15;
-            int32_t integrator = product >= 0
-                ? (product + 16384) >> 15
-                : -(((-product) + 16384) >> 15);
-            int32_t lowpass = integrator + rawAllpass[i];
-            rawAllpass[i] = lowpass + integrator;
-            input = (lowpass << 1) - input;
+        // Two normal stages follow four low-pass poles. Three-pole mode uses
+        // one normal stage plus a second all-pass whose coefficient is mapped
+        // to half the normal stage's low-frequency group delay.
+        int32_t afterTwoPoles = processRawAllpassStage(
+            input, cutoffQ15, rawAllpass[0]);
+        int32_t afterFourPoles = processRawAllpassStage(
+            afterTwoPoles, cutoffQ15, rawAllpass[1]);
+
+        int32_t fractionalCutoffQ15 =
+            ((cutoffQ15 << 1) *
+                reciprocalQ15For(32768 + cutoffQ15)) >> 15;
+        fractionalCutoffQ15 =
+            clamp32(fractionalCutoffQ15, 1, 32767);
+        int32_t afterThreePoles = processRawAllpassStage(
+            afterTwoPoles, fractionalCutoffQ15,
+            rawFractionalAllpass);
+
+        return poles == 3 ? afterThreePoles : afterFourPoles;
+    }
+
+    static int32_t processRawAllpassStage(int32_t input,
+        int32_t cutoffQ15, int32_t &state)
+    {
+        int32_t delta = input - state;
+        int32_t product = delta * cutoffQ15;
+        int32_t integrator = product >= 0
+            ? (product + 16384) >> 15
+            : -(((-product) + 16384) >> 15);
+        int32_t lowpass = integrator + state;
+        state = lowpass + integrator;
+        return (lowpass << 1) - input;
+    }
+
+    static int32_t processDistortion(int32_t input, uint8_t mode,
+        int32_t gainQ8, int32_t rail, int32_t knee)
+    {
+        if (mode == 0 || gainQ8 <= 256)
+            return input;
+
+        int32_t driven = (input * gainQ8) >> 8;
+
+        if (mode == 1)
+            return clamp32(driven, -rail, rail);
+        if (mode == 2) {
+            bool negative = driven < 0;
+            int32_t magnitude = negative ? -driven : driven;
+            if (magnitude > knee)
+                magnitude = knee + ((magnitude - knee) >> 2);
+            if (magnitude > 2047)
+                magnitude = 2047;
+            return negative ? -magnitude : magnitude;
+        }
+        return input;
+    }
+
+    int32_t processDistortionTone(int32_t input, uint8_t mode,
+        int32_t ratCutoffQ15, int32_t tsTrebleGainQ8)
+    {
+        if (mode == 1) {
+            ratToneState +=
+                ((input - ratToneState) * ratCutoffQ15) >> 15;
+            return ratToneState;
+        }
+        if (mode == 2) {
+            constexpr int32_t BassCutoffQ15 = 1100;
+            constexpr int32_t TrebleCutoffQ15 = 7200;
+            tsBassState +=
+                ((input - tsBassState) * BassCutoffQ15) >> 15;
+            tsTrebleState +=
+                ((input - tsTrebleState) * TrebleCutoffQ15) >> 15;
+            int32_t mid = tsTrebleState - tsBassState;
+            int32_t treble = input - tsTrebleState;
+            int32_t output = tsBassState + ((mid * 384) >> 8) +
+                ((treble * tsTrebleGainQ8) >> 8);
+            return clamp32(output, -2048, 2047);
         }
         return input;
     }
 
     static int32_t reciprocalQ15For(int32_t denominatorQ15)
     {
-        denominatorQ15 = clamp32(denominatorQ15, 32768, 163840);
+        denominatorQ15 = clamp32(denominatorQ15, 32768, 327680);
         uint32_t offset = (uint32_t)(denominatorQ15 - 32768);
         uint32_t index = offset >> 9;
         uint32_t fraction = offset & 0x1FFu;
-        if (index >= 256u)
-            return ReciprocalQ15Table[256];
+        if (index >= 576u)
+            return ReciprocalQ15Table[576];
         int32_t a = ReciprocalQ15Table[index];
         int32_t b = ReciprocalQ15Table[index + 1u];
         return a + (((b - a) * (int32_t)fraction) >> 9);
@@ -637,23 +809,23 @@ private:
         return value + (value >> 3);
     }
 
-    static int32_t softClip(int32_t value)
+    static int32_t diodePair(int32_t value)
     {
-        // Piecewise fixed-point saturation: linear through the centre, then a
-        // gentler slope before the final rail. This is cheap enough to use at
-        // every ladder stage and prevents resonance runaway.
         bool negative = value < 0;
         int32_t magnitude = negative ? -value : value;
-        if (magnitude > 2304)
-            magnitude = 2304 + ((magnitude - 2304) >> 3);
         if (magnitude > 3072)
-            magnitude = 3072;
+            magnitude = 2688 + ((magnitude - 3072) >> 3);
+        else if (magnitude > 1536)
+            magnitude = 1536 + (((magnitude - 1536) * 3) >> 2);
+        if (magnitude > 3840)
+            magnitude = 3840;
         return negative ? -magnitude : magnitude;
     }
 
     AudioParameters parameters = {
         midiNoteToPhaseIncrement(BaseMidiNote), 0, -2000,
-        4096, 0, 128, 32767, 12000, BaseMidiNote, 0, 0, 1
+        4096, 0, 128, 32767, 12000, 768, 1792, 960, 9600, 192,
+        BaseMidiNote, 0, 0, 1, 0, 0, 4
     };
     uint32_t audioSlot = 0;
     uint32_t phase = 0;
@@ -666,6 +838,10 @@ private:
     int32_t supplyQ15 = 0;
     int32_t ladder[4] = {};
     int32_t rawAllpass[2] = {};
+    int32_t rawFractionalAllpass = 0;
+    int32_t ratToneState = 0;
+    int32_t tsBassState = 0;
+    int32_t tsTrebleState = 0;
     bool lastGate = false;
     uint32_t lastEnvelopeTrigger = 0;
 };
@@ -765,14 +941,17 @@ uint8_t quantizedRandomNote(
     return (uint8_t)(note > 127u ? 127u : note);
 }
 
-void updateLeds(PlayMode mode, bool gate, bool accent, uint8_t note)
+void updateLeds(PlayMode mode, bool gate, bool accent, uint8_t note,
+    uint8_t filterPoles)
 {
     card.setLed(0, mode == PlayMode::CvMidi ? 4095 : 0);
     card.setLed(2, mode == PlayMode::Sequencer ? 4095 : 0);
     card.setLed(4, mode == PlayMode::Mute ? 4095 : 0);
     card.setLed(1, gate ? 4095 : 96);
     card.setLed(3, accent ? 4095 : 0);
-    card.setLed(5, (uint16_t)(((uint32_t)(note & 0x0Fu) * 4095u) / 15u));
+    card.setLed(5, filterPoles == 3
+        ? 4095
+        : (uint16_t)(((uint32_t)(note & 0x0Fu) * 3072u) / 15u));
 }
 
 void controlWorker()
@@ -783,7 +962,7 @@ void controlWorker()
         tuh_init(0);
     else
         tud_init(0);
-    bool deviceWasMounted = false;
+    bool deviceWasActive = false;
 
     HardwareSnapshot hardware = {};
     AudioParameters parameters = {};
@@ -802,6 +981,15 @@ void controlWorker()
     bool sequenceAccent = false;
     bool sequenceGlide = false;
     uint8_t sequenceNote = BaseMidiNote;
+    bool sequencePrepared = false;
+    bool queuedLegato = false;
+    uint8_t queuedNote = BaseMidiNote;
+    bool queuedAccent = false;
+    uint32_t sequenceTrigger = 0;
+    uint32_t lastMidiDisconnectSerial = midi.disconnectSerial();
+    uint32_t lastMidiConnectionSerial = midi.connectionSerial();
+    uint32_t disconnectPulse1Edges = 0;
+    bool midiDisconnectLock = false;
     uint32_t ledDivider = 0;
 
     while (true) {
@@ -810,9 +998,12 @@ void controlWorker()
         } else {
             tud_task();
             bool deviceMounted = tud_mounted();
-            if (deviceWasMounted && !deviceMounted)
-                midi.allNotesOff();
-            deviceWasMounted = deviceMounted;
+            bool deviceActive = deviceMounted && !tud_suspended();
+            if (deviceWasActive && !deviceActive)
+                midi.connectionLost();
+            else if (!deviceWasActive && deviceActive)
+                midi.connectionRestored();
+            deviceWasActive = deviceActive;
             uint8_t bytes[64];
             uint32_t count = tud_midi_stream_read(bytes, sizeof(bytes));
             for (uint32_t i = 0; i < count; ++i)
@@ -836,11 +1027,20 @@ void controlWorker()
         int32_t cutoffKnob = mainKnob;
         parameters.cutoffQ15 = 120 +
             (int32_t)(((int64_t)cutoffKnob * cutoffKnob * 31800) >> 24);
+        if (midi.filterPoles == 3) {
+            parameters.cutoffQ15 +=
+                (parameters.cutoffQ15 >> 1) + 512;
+            parameters.cutoffQ15 =
+                clamp32(parameters.cutoffQ15, 120, 32200);
+        }
 
         // Resonance uses a squared curve: most of X stays smooth and useful,
         // with strong resonance and self-oscillation reserved for the top end.
+        int32_t resonanceMaximum =
+            midi.filterPoles == 3 ? 35000 : 20500;
         parameters.resonanceQ12 =
-            (int32_t)(((int64_t)xKnob * xKnob * 10800) >> 24);
+            (int32_t)(((int64_t)xKnob * xKnob *
+                resonanceMaximum) >> 24);
 
         // One musically coupled control: clockwise gives a longer envelope and
         // more glide. Coefficients are calculated here, never in the ISR.
@@ -857,8 +1057,36 @@ void controlWorker()
         // X still adds some envelope sweep, but no longer stacks an extreme
         // sweep on top of maximum resonance.
         parameters.filterEnvelopeQ15 = 11000 + (xKnob * 3000) / 4095;
+        parameters.waveform = midi.waveform;
+        parameters.filterPoles = midi.filterPoles;
+        parameters.distortion =
+            midi.distortionAmount == 0 ? 0 : midi.distortion;
+        parameters.distortionGainQ8 =
+            256 + (int32_t)midi.distortionAmount * 1024 / 100;
+        parameters.distortionRail =
+            2047 - (int32_t)midi.distortionAmount * 511 / 100;
+        parameters.distortionKnee =
+            1280 - (int32_t)midi.distortionAmount * 640 / 100;
+        parameters.ratToneQ15 =
+            1200 + (int32_t)midi.distortionTone * 16800 / 100;
+        parameters.tsTrebleQ8 =
+            64 + (int32_t)midi.distortionTone * 256 / 100;
 
         uint64_t now = time_us_64();
+        uint32_t midiDisconnectSerial = midi.disconnectSerial();
+        if (midiDisconnectSerial != lastMidiDisconnectSerial) {
+            lastMidiDisconnectSerial = midiDisconnectSerial;
+            midiDisconnectLock = true;
+            disconnectPulse1Edges = hardware.pulse1Edges;
+        }
+        uint32_t midiConnectionSerial = midi.connectionSerial();
+        if (midiConnectionSerial != lastMidiConnectionSerial) {
+            lastMidiConnectionSerial = midiConnectionSerial;
+            midiDisconnectLock = false;
+        }
+        if (midiDisconnectLock &&
+            hardware.pulse1Edges != disconnectPulse1Edges)
+            midiDisconnectLock = false;
         if (mode == PlayMode::Sequencer) {
             bool externalClock = hardware.pulse2Edges != lastPulse2Edges;
             if (externalClock) {
@@ -889,18 +1117,42 @@ void controlWorker()
                     sequencerStepPeriod = stepPeriod;
                 }
                 lastSequencerStepTime = now;
-                sequenceNote = quantizedRandomNote(
-                    midi.scale, clamp32(midi.octaveSpan, 1, 4),
-                    midi.rootNote, midi.baseMidiNote);
-                sequenceAccent =
-                    (nextRandom() % 100u) < midi.accentProbability;
-                sequenceGlide =
-                    (nextRandom() % 100u) < midi.glideProbability;
+                if (!sequencePrepared) {
+                    sequenceNote = quantizedRandomNote(
+                        midi.scale, clamp32(midi.octaveSpan, 1, 4),
+                        midi.rootNote, midi.baseMidiNote);
+                    sequenceAccent =
+                        (nextRandom() % 100u) < midi.accentProbability;
+                    sequenceGlide = false;
+                    sequencePrepared = true;
+                    ++sequenceTrigger;
+                } else {
+                    uint8_t previousNote = sequenceNote;
+                    bool legatoTransition = queuedLegato && sequenceGate;
+                    sequenceNote = queuedNote;
+                    sequenceAccent = queuedAccent;
+                    sequenceGlide =
+                        legatoTransition && sequenceNote != previousNote;
+                    if (!legatoTransition)
+                        ++sequenceTrigger;
+                }
                 sequenceGate = true;
                 gateOffTime = now +
                     (sequencerStepPeriod * midi.gateLength) / 100u;
+                queuedLegato =
+                    (nextRandom() % 100u) < midi.glideProbability;
+                bool queuedTie =
+                    queuedLegato && ((nextRandom() & 3u) == 0u);
+                queuedNote = queuedTie
+                    ? sequenceNote
+                    : quantizedRandomNote(
+                        midi.scale, clamp32(midi.octaveSpan, 1, 4),
+                        midi.rootNote, midi.baseMidiNote);
+                queuedAccent = queuedTie
+                    ? sequenceAccent
+                    : (nextRandom() % 100u) < midi.accentProbability;
             }
-            if (sequenceGate && now >= gateOffTime)
+            if (sequenceGate && !queuedLegato && now >= gateOffTime)
                 sequenceGate = false;
 
             parameters.midiNote = sequenceNote;
@@ -911,9 +1163,12 @@ void controlWorker()
             parameters.accent = sequenceAccent;
             parameters.glideQ15 =
                 sequenceGlide ? physicalGlideQ15 : 32767;
-            parameters.envelopeTrigger = 0;
+            parameters.envelopeTrigger = sequenceTrigger;
             parameters.powerCut = 0;
         } else if (mode == PlayMode::CvMidi) {
+            sequencePrepared = false;
+            queuedLegato = false;
+            sequenceGate = false;
             bool forceSlide = hardware.pulse2High;
             if (midi.gate) {
                 parameters.midiNote = midi.note;
@@ -943,11 +1198,18 @@ void controlWorker()
                     forceSlide ? physicalGlideQ15 : 32767;
                 parameters.envelopeTrigger = 0;
             }
+            if (midiDisconnectLock) {
+                parameters.gate = 0;
+                parameters.accent = 0;
+                parameters.glideQ15 = 32767;
+            }
             parameters.powerCut = 0;
         } else {
+            sequencePrepared = false;
+            queuedLegato = false;
+            sequenceGate = false;
             parameters.gate = 0;
             parameters.accent = 0;
-            parameters.envelopeTrigger = 0;
             parameters.powerCut = 1;
         }
 
@@ -956,13 +1218,23 @@ void controlWorker()
         if (++ledDivider >= 20) {
             ledDivider = 0;
             updateLeds(mode, parameters.gate, parameters.accent,
-                parameters.midiNote);
+                parameters.midiNote, parameters.filterPoles);
         }
         sleep_us(500);
     }
 }
 
 } // namespace
+
+extern "C" void tud_mount_cb(void)
+{
+    midi.connectionRestored();
+}
+
+extern "C" void tud_umount_cb(void)
+{
+    midi.connectionLost();
+}
 
 extern "C" void tuh_midi_mount_cb(
     uint8_t dev_addr, uint8_t in_ep, uint8_t out_ep,
@@ -974,6 +1246,7 @@ extern "C" void tuh_midi_mount_cb(
     (void)num_cables_tx;
     if (hostMidiDeviceAddress == 0)
         hostMidiDeviceAddress = dev_addr;
+    midi.connectionRestored();
 }
 
 extern "C" void tuh_midi_umount_cb(uint8_t dev_addr, uint8_t instance)
@@ -981,7 +1254,7 @@ extern "C" void tuh_midi_umount_cb(uint8_t dev_addr, uint8_t instance)
     (void)instance;
     if (dev_addr == hostMidiDeviceAddress)
         hostMidiDeviceAddress = 0;
-    midi.allNotesOff();
+    midi.connectionLost();
 }
 
 extern "C" void tuh_midi_rx_cb(uint8_t dev_addr, uint32_t num_packets)

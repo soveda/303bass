@@ -69,6 +69,7 @@ configuration, outputs, generative sequencing, and battery-pull behavior.
 - External 1V/oct CV and gate control.
 - USB MIDI device mode for computers and browsers.
 - USB MIDI host mode for class-compliant controllers.
+- Host-mode MIDI CC1 cutoff control with physical-knob pickup.
 - Last-note-priority monophonic MIDI handling with clean disconnect recovery.
 - Random scale-quantized sequencer with internal or external clock.
 - History-aware melodic generation that avoids immediate repeats, discourages
@@ -134,11 +135,24 @@ probability.
 - USB MIDI notes take priority while a MIDI note is held
 - MIDI velocity 112–127 produces an accent
 
-Accent adds a stronger filter-contour push and a 50% level lift relative to
+Accent adds a stronger filter-contour push and a 62.5% level lift relative to
 normal notes. The experimental build reserves output headroom and adds a short
-contour-shaped bright component, so accented notes should remain distinctly
-brighter and louder when cutoff is already near maximum or distortion is
-active.
+contour-shaped bright component. That bright blend has also been increased
+from 25% to 37.5% at the start of the contour, so accented notes should be more
+prominent when cutoff is already near maximum or distortion is active.
+
+This experimental revision also models the original dual-gang resonance/accent
+sweep interaction. Each accented articulation adds charge to a virtual
+capacitor rather than resetting a fixed accent envelope. The charge drains
+over a few hundred milliseconds, so closely spaced accented notes retain some
+of the previous voltage and drive each following filter sweep higher.
+
+Resonance acts like the second section of the analogue pot: anti-clockwise
+favours the immediate filter-envelope hit, while clockwise increasingly
+favours the smoother capacitor response. With high resonance, one isolated
+accent should make a rounded “wow”; a fast group of accents should climb over
+the first few notes, then fall back after a pause. The capacitor memory can
+briefly brighten a following non-accented note, as the real circuit does.
 
 VCA retriggers attack from the current envelope level instead of resetting to
 literal zero, reducing clicks when a new articulation arrives before the
@@ -150,6 +164,20 @@ the ordinary mounted and physical-connection flags can remain true after the
 DAW cable is removed. Host frame traffic stopping puts the device bus into
 suspend and now clears held MIDI/parser state, latching the filtered voice gate
 low until USB traffic resumes or a fresh physical gate edge takes control.
+
+### Host-mode CC1 cutoff and pickup
+
+When the card boots as a USB host, MIDI CC1 controls filter cutoff across the
+full Main-knob range. CC1 is ignored in USB device mode.
+
+The cutoff response is calibrated so both Main and CC1 continue opening the
+filter audibly throughout the clockwise half of their travel, while preserving
+the fully open endpoint.
+
+After CC1 takes control, moving Main does nothing until the knob reaches and
+crosses the current CC1 position. Main then picks up the cutoff without a jump
+and resumes normal control. A subsequent CC1 message takes over again.
+Disconnecting the hosted MIDI controller releases the CC1 override.
 
 ### Square-Wave Distortion Character
 
@@ -193,6 +221,42 @@ The generator is not a fixed looping pattern. It remembers the last few scale
 positions, avoids immediate repeats, generally walks to nearby notes, and
 occasionally makes a wider or octave jump. Changing scale, root, base octave,
 or range resets that melodic history.
+
+The experimental editor can replace the generator with an editable pattern of
+1–16 steps. Every step has independent lanes for chromatic note, octave,
+accent, gate percentage, and tie-to-next. Root transposes the note lane and
+Base Octave anchors the octave lane. A tie into a changed note creates a slide
+without retriggering; a tie into the same note creates a true repeated-note
+tie. Disabling the pattern returns immediately to the generative sequencer.
+
+The editor also provides a separate randomize button for each lane, allowing
+notes to be changed while accents, gates, octaves, or ties remain untouched.
+Random Notes chooses pseudorandom pitch classes only from the currently
+selected scale and avoids immediate repeats where possible. Root transposition
+is applied later by the card.
+Edits play from RAM immediately. Save Slot writes them to card flash; unsaved
+edits are replaced by the active saved slot after reset.
+
+Initial Step selects which stored lane column plays first without moving or
+rewriting any lane data. It wraps within the selected pattern length: for
+example, length 5 with Initial Step 3 plays stored steps 3, 4, 5, 1, 2.
+
+Reverse Playback runs from Initial Step backward through the active pattern.
+For example, length 5 with Initial Step 3 plays 3, 2, 1, 5, 4. Step ties follow
+the playback direction, so a tie on step 3 carries into step 2 when reversed.
+
+Pendulum Playback travels to the far end of the active pattern and then
+reverses, without repeating the turnaround step. The Reverse checkbox chooses
+its initial direction. Ties follow the actual travel direction at both
+turnarounds.
+
+Four pattern slots are stored in card flash. Save Slot explicitly writes the
+current lanes, length, Initial Step, and playback mode to the selected slot;
+Load Slot recalls it immediately. The active slot and all general editor
+settings also restore after power cycling. Flash is checksummed, versioned,
+and only rewritten when data has changed, following Cizzle’s persistence
+approach. The editor keeps a browser mirror so recalled slots can repopulate
+the visible controls.
 
 Glide probability now prepares transitions one step ahead. A selected
 transition keeps the gate continuously high: most move to a new pitch and
@@ -280,6 +344,10 @@ Then open:
 http://localhost:5173/Fr330hfr33.html
 ```
 
+The editor is divided into Sound and Sequencer pages. Connect MIDI, Apply, and
+the connection status stay at the top of both pages. The editor remembers the
+last page used, and Apply always sends the complete sound and sequencer state.
+
 Use Chrome or Edge with Web MIDI and SysEx support. Use a USB-C data cable,
 close Serial Monitor and other MIDI applications, select **Fr330hfr33** in the
 browser MIDI dialog, and press **Apply**.
@@ -297,19 +365,25 @@ clock.
 Ideas worth considering after the current experimental firmware has passed
 hardware testing:
 
-- Separate 16-step lanes for note, accent, gate length, octave, and tie state.
-- Selective randomization, allowing notes to be regenerated while preserving
-  accents, gates, octaves, or other lanes.
-- Variable pattern length plus pattern rotation/offset.
-- Forward, backward, and pendulum playback, with tie handling at turnaround
-  boundaries.
 - Per-step short, medium, or full gate lengths instead of one global gate
   percentage.
-- Several stored pattern slots with recall from the editor or hardware.
-- Sequencer swing and an optional small timing-jitter control.
-- An acidness/pattern-type control that progressively changes root repetition,
-  interval choices, ties, accents, and gate behavior.
+- Sequencer swing.
 - Incoming chord analysis that derives a root and permitted note pool for the
   generator.
-- Velocity or aftertouch modulation of sequence density, gate behavior,
-  cutoff, or resonance.
+
+### Acidness Control
+
+Acidness is a coordinated musical-density control rather than another audio
+effect. In generator mode, low values favour roots and nearby scale movement,
+longer gates, fewer accents, and little legato. Raising it progressively
+introduces wider scale-degree movement, octave jumps, shorter punchier gates,
+more accents, and more tied slides.
+
+For editable patterns, **Acidify Pattern** uses the current Acidness value and
+selected scale to rewrite all five lanes into a fixed, editable pattern. Low
+values produce restrained root-heavy lines; high values produce restless
+intervals, octave movement, clustered accents, short gates, and frequent ties.
+The result does not keep changing during playback: it remains stable until
+Acidify Pattern or another lane-randomisation button is pressed again.
+
+Acidness is stored with the persistent global settings.

@@ -1,14 +1,14 @@
 id: Fr330hfr33
 title: Fr330hfr33
 release: RC1 / 0.9.0
-summary: Acid bass voice with resonant ladder filter, glide, USB MIDI, and random sequencing
-description: Fixed-point acid bass synthesiser with a sawtooth oscillator, four-pole TPT resonant ladder filter, accented AR envelope, pitch glide, USB MIDI device/host operation, and a scale-aware random sequencer.
+summary: Diode-filter acid voice with selectable oscillator, distortion, glide, USB MIDI, and sequencing
+description: Fixed-point acid bass synthesiser with a switchable three- or four-pole diode-style resonant ladder, Web MIDI-selectable saw or square oscillator, RAT-style or Tube Screamer-style distortion, accented envelope, glide, USB MIDI device/host operation, and a scale-aware random sequencer.
 panel:
   controls:
     main:
       label: Cutoff
       description: >-
-        Sets the ladder filter resting cutoff with a curved response:
+        Sets the diode-style ladder filter resting cutoff with a curved response:
         counter-clockwise is dark, the middle is broad and musical, and
         clockwise is bright.
       source: curated
@@ -16,9 +16,9 @@ panel:
       label: Resonance
       description: >-
         Uses a curved response: the lower range adds body, the upper range
-        becomes nasal and acid-like, and self-oscillation is reserved for the
-        final part of travel. Resonance makeup reduces level loss, while X adds
-        only a small amount of extra filter-envelope sweep.
+        becomes nasal and acid-like, and the final part of travel reaches firm
+        self-oscillation. Broad diode-pair saturation keeps the oscillation
+        round, while X adds only a small amount of extra filter-envelope sweep.
       source: curated
     'y':
       label: Decay / Glide
@@ -83,8 +83,8 @@ panel:
     audio_out_r:
       label: |-
         Raw
-        Saw
-      description: Phase-aligned raw sawtooth oscillator for blending with the filtered voice.
+        Osc
+      description: Phase-aligned raw selected oscillator for blending with the filtered voice.
       source: curated
     cv_out_1:
       label: |-
@@ -118,9 +118,14 @@ leds:
   - "LEDs 1, 3, and 5 indicate switch-up CV/MIDI mode, switch-middle sequencer mode, and switch-down battery-pull mode respectively."
   - "LED 2 follows the current gate, with a dim idle level."
   - "LED 4 indicates accented notes."
-  - "LED 6 displays the low four bits of the current MIDI note as brightness."
+  - "LED 6 displays the low four bits of the current MIDI note as brightness, or stays fully lit in 18 dB three-pole mode."
 notes:
-  - "The Web MIDI editor configures major pentatonic, minor pentatonic, Ionian, Lydian, ascending melodic minor, or chromatic scale plus root note, base octave, accent probability, sequencer octave span, gate length, glide probability, MIDI input channel, internal tempo, and MIDI clock sync."
+  - "The Web MIDI editor configures waveform, diode-filter slope, distortion mode, drive and tone plus scale, root note, base octave, accent probability, sequencer octave span, gate length, legato-transition probability, MIDI input channel, internal tempo, and MIDI clock sync."
+  - "Sequencer legato transitions are prepared one step ahead so the gate remains high: most selected transitions slide without retriggering, while one quarter become repeated-note ties."
+  - "Accent reserves output headroom, applies a 62.5% level lift, and adds a short contour-shaped bright component."
+  - "MIDI device or host disconnection latches the gate low until USB reconnects or a fresh physical gate edge hands control back to CV."
+  - "LED 6 is fully lit in 18 dB three-pole mode."
+  - "RAT-style and Tube Screamer-style clipping differ clearly with the saw but can sound similar with the already rail-shaped square waveform."
   - "The default sequencer base is MIDI note 36 (C2); the editor can select C1, C2, C3, or C4 before root-note transposition."
   - "The note generator remembers recent scale positions to reduce repetition while retaining occasional melodic and octave jumps."
   - "Open web_config/Fr330hfr33.html in Chrome or Edge, connect to the Fr330hfr33 MIDI output, then use Apply to send settings."
@@ -131,7 +136,7 @@ notes:
   - "Monophonic MIDI uses last-note priority and clears held notes when USB disconnects."
   - "In CV/MIDI mode, Pulse In 2 high enables manual glide. MIDI note overlaps also create automatic legato glide while keeping the gate and envelope open."
   - "The firmware runs the RP2040 at 192 MHz, copies the complete binary to RAM, and keeps division, locks, waits, USB work, and software 64-bit multiplication out of the audio callback."
-  - "This is a WIP build awaiting full hardware profiling and musical tuning."
+  - "This release candidate has passed functional, disconnect/reconnect, long-running, and processor-stress hardware testing."
 source:
   - Fr330hfr33.cpp
   - Fr330hfr33_LUT.cpp

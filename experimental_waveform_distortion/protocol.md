@@ -25,11 +25,12 @@ F0 7D 46 33 30 33 01
    distortion_amount
    distortion_tone
    filter_poles
+   acidness
 F7
 ```
 
-The complete message is 24 bytes including `F0` and `F7`. The firmware stores
-the 22 bytes between them in `sysex[]`.
+The complete message is 25 bytes including `F0` and `F7`. The firmware stores
+the 23 bytes between them in `sysex[]`.
 
 ## Header
 
@@ -63,8 +64,9 @@ include the leading `F0`.
 | 19 | 20 | Distortion amount | `0–100`; zero bypasses distortion and tone |
 | 20 | 21 | Distortion tone | `0–100`, dark to bright |
 | 21 | 22 | Diode filter poles | `4` for 24 dB/octave, `3` for 18 dB/octave |
+| 22 | 23 | Acidness | `0–100`; coordinated generator and pattern-mutation intensity |
 
-Wire byte 23 is `F7`, the SysEx terminator.
+Wire byte 24 is `F7`, the SysEx terminator.
 
 ## Distortion behavior
 
@@ -91,6 +93,7 @@ The firmware accepts these internal SysEx lengths:
 | 20 | Distortion amount |
 | 21 | Distortion tone; previous experimental editor |
 | 22 | Diode filter pole count; current experimental editor |
+| 23 | Acidness |
 
 Missing experimental fields retain their current/default values:
 
@@ -107,6 +110,61 @@ Invalid values are clamped or replaced with safe defaults.
 Command `01` retains the release-candidate configuration prefix. If a future
 change alters existing field meanings or ordering, use a new command byte
 rather than reinterpreting command `01`.
+
+## Command 02 — editable pattern
+
+The separate-lane pattern is sent as a second message:
+
+```text
+F0 7D 46 33 30 33 02
+   enabled
+   pattern_length
+   [note octave accent gate tie] × 16
+   initial_step
+   reverse
+   pendulum
+   active_slot
+F7
+```
+
+There are 92 bytes between `F0` and `F7`, and 94 bytes on the wire. Firmware
+also accepts the earlier 88–91 byte payloads; missing fields default to
+Initial Step 1, forward playback, pendulum off, and slot 1.
+
+| Field | Values |
+| --- | --- |
+| Enabled | `0` keeps the generative sequencer; `1` uses the editable pattern |
+| Pattern length | `1–16` steps |
+| Note | `0–11`, chromatic C through B; Root transposes it |
+| Octave | `0–3`, added above Base Octave |
+| Accent | `0` normal, `1` accented |
+| Gate | `10–95` percent of that step |
+| Tie | `1` holds this step’s gate into the following step |
+| Initial step | Stored as `0–15`, displayed as steps `1–16`; selects the first lane column read |
+| Reverse | `0` forward, `1` reverse |
+| Pendulum | `0` loop, `1` bounce between both ends without repeating the turnaround step |
+| Active slot | `0–3`, representing slots 1–4 |
+
+A tied transition to a different programmed pitch slides without retriggering.
+A tied transition to the same pitch is a true repeated-note tie. Ties follow
+the selected playback direction. Unsaved edits are session-only; the active
+saved slot returns after reset.
+
+## Commands 03 and 04 — pattern slots
+
+```text
+F0 7D 46 33 30 33 03 slot F7   recall slot
+F0 7D 46 33 30 33 04 slot F7   save current pattern to slot
+```
+
+Slot is `0–3`. Recall changes the running pattern immediately. Save copies the
+current lane data and playback settings into the selected card-flash slot.
+Global command-01 settings are also persistent and restore automatically at
+boot.
+
+Flash storage follows Cizzle’s scheme: a versioned structure in the final flash
+sector, an FNV-1a checksum, validity checks on boot, and erase/program only when
+the complete stored state has changed.
 
 When adding fields:
 

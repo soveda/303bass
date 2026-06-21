@@ -55,6 +55,7 @@ target_link_libraries(Fr330hfr33Experimental
     hardware_dma
     hardware_spi
     hardware_clocks
+    hardware_flash
     hardware_i2c
 )
 

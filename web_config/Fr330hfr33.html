@@ -42,6 +42,33 @@
         <option value="5">Chromatic</option>
       </select>
     </label>
+    <label>Oscillator waveform
+      <select id="waveform">
+        <option value="0">Saw</option>
+        <option value="1">Square</option>
+      </select>
+    </label>
+    <label>Diode filter slope
+      <select id="filterPoles">
+        <option value="4">24 dB/octave — 4 pole</option>
+        <option value="3">18 dB/octave — 3 pole</option>
+      </select>
+    </label>
+    <label>Filtered voice distortion
+      <select id="distortion">
+        <option value="0">Off</option>
+        <option value="1">RAT-style hard clipping</option>
+        <option value="2">Tube Screamer-style soft clipping</option>
+      </select>
+    </label>
+    <label>Distortion / overdrive amount:
+      <output id="driveOut">50%</output>
+      <input id="drive" type="range" min="0" max="100" value="50">
+    </label>
+    <label>Distortion tone:
+      <output id="toneOut">50%</output>
+      <input id="tone" type="range" min="0" max="100" value="50">
+    </label>
     <label>Accent probability: <output id="accentOut">32%</output>
       <input id="accent" type="range" min="0" max="100" value="32">
     </label>
@@ -80,7 +107,7 @@
     <label>Gate length: <output id="gateOut">60%</output>
       <input id="gate" type="range" min="10" max="95" value="60">
     </label>
-    <label>Glide probability: <output id="glideOut">35%</output>
+    <label>Legato / tie probability: <output id="glideOut">35%</output>
       <input id="glide" type="range" min="0" max="100" value="35">
     </label>
     <label>MIDI input channel
@@ -126,6 +153,10 @@ $("gate").addEventListener("input", () =>
   $("gateOut").value = `${$("gate").value}%`);
 $("glide").addEventListener("input", () =>
   $("glideOut").value = `${$("glide").value}%`);
+$("drive").addEventListener("input", () =>
+  $("driveOut").value = `${$("drive").value}%`);
+$("tone").addEventListener("input", () =>
+  $("toneOut").value = `${$("tone").value}%`);
 
 $("connect").addEventListener("click", async () => {
   try {
@@ -158,6 +189,11 @@ $("apply").addEventListener("click", () => {
     Number($("channel").value),
     $("midiClock").checked ? 1 : 0,
     Number($("octave").value),
+    Number($("waveform").value),
+    Number($("distortion").value),
+    Number($("drive").value),
+    Number($("tone").value),
+    Number($("filterPoles").value),
     0xF7
   ];
   outputPort.send(message);
