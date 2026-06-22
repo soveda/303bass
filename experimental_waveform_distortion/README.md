@@ -1,13 +1,13 @@
 # Fr330hfr33 experimental area
 
-This folder contains the implementation that was hardware-tested and promoted
-to main as version `0.9.1`. It remains independently buildable as a safe place
-for evaluating later changes before they are promoted.
+This folder contains the independently buildable experimental workspace used
+to hardware-test changes before promotion to main. Its latest tested changes
+were promoted to main as version `0.9.2`.
 
 Only changes that pass hardware testing here should be added to main, and only
 when promotion is explicitly requested.
 
-## Implemented in 0.9.1
+## Tested baseline
 
 - Saw and square oscillators
 - RAT-style and Tube Screamer-style distortion with amount and tone
@@ -29,6 +29,16 @@ when promotion is explicitly requested.
 - Incoming chord analysis to derive a root and permitted note pool
 
 Aftertouch modulation and timing jitter are intentionally excluded.
+
+## Current experimental additions
+
+- **Mutate Pattern** changes only one to three steps in the Web editor, creating
+  a nearby variation rather than replacing the pattern.
+- MIDI **CC64** supports a standard sustain pedal for keyboard performance.
+- MIDI **CC20** controls a volatile Intensity macro. It progressively opens the
+  filter, adds a restrained amount of resonance and filter contour, and adds
+  drive when distortion is already enabled. Intensity always returns to zero
+  after startup and is never written to flash.
 
 ## Building the experimental firmware
 

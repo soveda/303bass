@@ -131,11 +131,21 @@
         <option value="60">C4 — MIDI 60</option>
       </select>
     </label>
-    <label class="sequencer-page">Gate length: <output id="gateOut">60%</output>
-      <input id="gate" type="range" min="10" max="95" value="60">
+    <label class="sequencer-page">Gate
+      <select id="gate">
+        <option value="20">Pluck</option>
+        <option value="40">Short</option>
+        <option value="65" selected>Medium</option>
+        <option value="90">Long</option>
+      </select>
     </label>
-    <label class="sequencer-page">Legato / tie probability: <output id="glideOut">35%</output>
-      <input id="glide" type="range" min="0" max="100" value="35">
+    <label class="sequencer-page">Legato
+      <select id="glide">
+        <option value="0">None</option>
+        <option value="20">Low</option>
+        <option value="45" selected>Medium</option>
+        <option value="75">High</option>
+      </select>
     </label>
     <label class="sequencer-page">Acidness: <output id="acidnessOut">50%</output>
       <input id="acidness" type="range" min="0" max="100" value="50">
@@ -162,6 +172,9 @@
     </label>
     <label class="sequencer-page">Internal tempo
       <input id="tempo" type="number" min="30" max="240" value="120">
+    </label>
+    <label class="sequencer-page">Swing: <output id="swingOut">1.00:1</output>
+      <input id="swing" type="range" min="0" max="100" value="0">
     </label>
     <label class="check sequencer-page">
       <input id="midiClock" type="checkbox">
@@ -199,15 +212,17 @@
     </div>
     <div class="sequencer-page">
       <strong>Separate step lanes</strong>
-      <p class="hint">Note is chromatic and transposed by Root. Octave is
-      relative to Base Octave. Tie keeps this step’s gate open into the next;
-      a changed note slides and a repeated note becomes a true tie.</p>
+      <p class="hint">Note is chromatic and transposed by Root; Mute creates a
+      rest. Octave is relative to Base Octave. Tie keeps this step’s gate open
+      into the next; a changed note slides and a repeated note becomes a true
+      tie.</p>
       <div class="lane-actions">
         <button id="randomNotes" type="button" class="secondary">Random notes</button>
         <button id="randomAccents" type="button" class="secondary">Random accents</button>
         <button id="randomGates" type="button" class="secondary">Random gates</button>
         <button id="randomOctaves" type="button" class="secondary">Random octaves</button>
         <button id="randomTies" type="button" class="secondary">Random ties</button>
+        <button id="mutatePattern" type="button" class="secondary">Mutate pattern</button>
         <button id="acidifyPattern" type="button">Acidify pattern</button>
       </div>
     </div>
@@ -215,7 +230,7 @@
       <table>
         <thead>
           <tr><th>Step</th><th>Note</th><th>Octave</th><th>Accent</th>
-            <th>Gate %</th><th>Tie →</th></tr>
+            <th>Gate</th><th>Tie →</th></tr>
         </thead>
         <tbody id="patternRows"></tbody>
       </table>
@@ -236,7 +251,16 @@ $("showSequencer").addEventListener("click", () => showPage("sequencer"));
 showPage(localStorage.getItem("fr330hfr33-editor-page") === "sequencer"
   ? "sequencer" : "sound");
 const noteNames = ["C", "C♯", "D", "D♯", "E", "F",
-  "F♯", "G", "G♯", "A", "A♯", "B"];
+  "F♯", "G", "G♯", "A", "A♯", "B", "Mute"];
+const gateChoices = [
+  { value: 20, label: "Pluck" },
+  { value: 40, label: "Short" },
+  { value: 65, label: "Medium" },
+  { value: 90, label: "Long" }
+];
+const nearestGate = value => gateChoices.reduce((best, choice) =>
+  Math.abs(choice.value - value) < Math.abs(best.value - value)
+    ? choice : best).value;
 const scaleNotes = [
   [0, 2, 4, 7, 9],
   [0, 3, 5, 7, 10],
@@ -248,8 +272,8 @@ const scaleNotes = [
 const defaultNotes = [0, 0, 7, 0, 3, 0, 10, 0, 0, 0, 7, 3, 0, 10, 7, 3];
 const defaultOctaves = [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0];
 const defaultAccents = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
-const defaultGates = [60, 45, 60, 35, 60, 45, 60, 35,
-  60, 45, 60, 35, 60, 45, 60, 35];
+const defaultGates = [65, 40, 65, 20, 65, 40, 65, 20,
+  65, 40, 65, 20, 65, 40, 65, 20];
 
 for (let step = 0; step < 16; step++) {
   const row = document.createElement("tr");
@@ -262,7 +286,9 @@ for (let step = 0; step < 16; step++) {
       `<option value="${value}"${value === defaultOctaves[step] ? " selected" : ""}>+${value}</option>`
     ).join("")}</select></td>
     <td><input class="step-accent" type="checkbox"${defaultAccents[step] ? " checked" : ""}></td>
-    <td><input class="step-gate" type="number" min="10" max="95" value="${defaultGates[step]}"></td>
+    <td><select class="step-gate">${gateChoices.map(choice =>
+      `<option value="${choice.value}"${choice.value === defaultGates[step] ? " selected" : ""}>${choice.label}</option>`
+    ).join("")}</select></td>
     <td><input class="step-tie" type="checkbox"></td>`;
   $("patternRows").appendChild(row);
 }
@@ -284,12 +310,54 @@ $("randomNotes").addEventListener("click", () => {
 $("randomAccents").addEventListener("click", () =>
   lane("step-accent").forEach(control => control.checked = Math.random() < .3));
 $("randomGates").addEventListener("click", () =>
-  lane("step-gate").forEach(control => control.value = 20 + randomInt(76)));
+  lane("step-gate").forEach(control =>
+    control.value = gateChoices[randomInt(gateChoices.length)].value));
 $("randomOctaves").addEventListener("click", () =>
   lane("step-octave").forEach(control => control.value =
     Math.random() < .8 ? 0 : 1 + randomInt(2)));
 $("randomTies").addEventListener("click", () =>
   lane("step-tie").forEach(control => control.checked = Math.random() < .3));
+$("mutatePattern").addEventListener("click", () => {
+  const length = Math.max(1, Math.min(16,
+    Number($("patternLength").value) || 16));
+  const selectedScale = scaleNotes[Number($("scale").value)] || scaleNotes[0];
+  const notes = lane("step-note");
+  const octaves = lane("step-octave");
+  const accents = lane("step-accent");
+  const gates = lane("step-gate");
+  const ties = lane("step-tie");
+  const changedSteps = new Set();
+  const changes = 1 + randomInt(3);
+
+  while (changedSteps.size < changes)
+    changedSteps.add(randomInt(length));
+
+  changedSteps.forEach(step => {
+    const mutation = randomInt(10);
+    if (mutation < 5) {
+      const current = Number(notes[step].value);
+      if (current === 12) {
+        accents[step].checked = !accents[step].checked;
+      } else {
+        const alternatives = selectedScale.filter(note => note !== current);
+        if (alternatives.length)
+          notes[step].value = alternatives[randomInt(alternatives.length)];
+      }
+    } else if (mutation < 7) {
+      accents[step].checked = !accents[step].checked;
+    } else if (mutation === 7) {
+      const alternatives = [25, 45, 65, 90].filter(
+        value => value !== Number(gates[step].value));
+      gates[step].value = alternatives[randomInt(alternatives.length)];
+    } else if (mutation === 8) {
+      octaves[step].value = Number(octaves[step].value) === 0 ? 1 : 0;
+    } else {
+      ties[step].checked = !ties[step].checked;
+    }
+  });
+  $("status").textContent =
+    `Mutated ${changes} step${changes === 1 ? "" : "s"}. Press Apply or Save Slot.`;
+});
 $("acidifyPattern").addEventListener("click", () => {
   const acid = Number($("acidness").value) / 100;
   const selectedScale = scaleNotes[Number($("scale").value)] || scaleNotes[0];
@@ -315,7 +383,7 @@ $("acidifyPattern").addEventListener("click", () => {
       Math.random() < acid * .22 ? 1 + randomInt(2) : 0;
     accents[step].checked =
       Math.random() < .08 + acid * .55;
-    gates[step].value = Math.round(
+    gates[step].value = nearestGate(
       65 - acid * 35 + Math.random() * (15 + acid * 20));
     ties[step].checked =
       Math.random() < .03 + acid * .52;
@@ -352,18 +420,18 @@ const restorePatternUi = pattern => {
   lane("step-accent").forEach((control, i) =>
     control.checked = pattern.accents?.[i] ?? !!defaultAccents[i]);
   lane("step-gate").forEach((control, i) =>
-    control.value = pattern.gates?.[i] ?? defaultGates[i]);
+    control.value = nearestGate(pattern.gates?.[i] ?? defaultGates[i]));
   lane("step-tie").forEach((control, i) =>
     control.checked = pattern.ties?.[i] ?? false);
 };
 $("accent").addEventListener("input", () =>
   $("accentOut").value = `${$("accent").value}%`);
-$("gate").addEventListener("input", () =>
-  $("gateOut").value = `${$("gate").value}%`);
-$("glide").addEventListener("input", () =>
-  $("glideOut").value = `${$("glide").value}%`);
 $("acidness").addEventListener("input", () =>
   $("acidnessOut").value = `${$("acidness").value}%`);
+$("swing").addEventListener("input", () => {
+  const amount = Number($("swing").value) / 300;
+  $("swingOut").value = `${((1 + amount) / (1 - amount)).toFixed(2)}:1`;
+});
 $("drive").addEventListener("input", () =>
   $("driveOut").value = `${$("drive").value}%`);
 $("tone").addEventListener("input", () =>
@@ -437,6 +505,7 @@ $("apply").addEventListener("click", () => {
     Number($("tone").value),
     Number($("filterPoles").value),
     Number($("acidness").value),
+    Number($("swing").value),
     0xF7
   ];
   outputPort.send(message);
@@ -456,7 +525,7 @@ $("apply").addEventListener("click", () => {
       Number(notes[step].value),
       Number(octaves[step].value),
       accents[step].checked ? 1 : 0,
-      Math.max(10, Math.min(95, Number(gates[step].value) || 60)),
+      Math.max(10, Math.min(95, Number(gates[step].value) || 65)),
       ties[step].checked ? 1 : 0
     );
   }

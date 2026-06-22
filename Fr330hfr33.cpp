@@ -63,7 +63,7 @@ struct PersistentState {
     uint8_t acidness;
     uint8_t patternEnabled;
     uint8_t activeSlot;
-    uint8_t reserved;
+    uint8_t swing;
     PatternSlot slots[PatternSlotCount];
     uint32_t checksum;
 };
@@ -222,8 +222,14 @@ public:
     {
         if (byte == 0xF8u) {
             if (midiClockSync && midiClockRunning) {
-                if (++midiClockTicks >= 12u) {
+                uint8_t swingTicks =
+                    (uint8_t)(((uint16_t)swing * 4u + 50u) / 100u);
+                uint8_t ticksThisStep = midiClockLongStep
+                    ? (uint8_t)(12u + swingTicks)
+                    : (uint8_t)(12u - swingTicks);
+                if (++midiClockTicks >= ticksThisStep) {
                     midiClockTicks = 0;
+                    midiClockLongStep = !midiClockLongStep;
                     ++pendingMidiSteps;
                 }
             }
@@ -232,6 +238,7 @@ public:
         if (byte == 0xFAu) {
             midiClockTicks = 0;
             pendingMidiSteps = 0;
+            midiClockLongStep = true;
             midiClockRunning = true;
             return;
         }
@@ -243,6 +250,7 @@ public:
             midiClockRunning = false;
             midiClockTicks = 0;
             pendingMidiSteps = 0;
+            midiClockLongStep = true;
             return;
         }
         if (byte >= 0xF8u)
@@ -289,13 +297,27 @@ public:
             // data[1] the high seven bits, and 8192 is the centre position.
             pitchBend = ((int32_t)data[1] << 7) | data[0];
             pitchBend -= 8192;
-        } else if (type == 0xB0u && hostInputMode &&
-            data[0] == 1u) {
-            // In USB host mode, MIDI CC1 (mod wheel) remotely controls the
-            // filter cutoff. Device mode deliberately leaves CC1 untouched.
-            cutoffCc1Value = data[1] & 0x7Fu;
-            cutoffCc1Active = true;
-            ++cutoffCc1SerialValue;
+        } else if (type == 0xB0u) {
+            uint8_t controller = data[0] & 0x7Fu;
+            uint8_t value = data[1] & 0x7Fu;
+            if (controller == 1u && hostInputMode) {
+                // In USB host mode, MIDI CC1 (mod wheel) remotely controls the
+                // filter cutoff. Device mode deliberately leaves CC1 untouched.
+                cutoffCc1Value = value;
+                cutoffCc1Active = true;
+                ++cutoffCc1SerialValue;
+            } else if (controller == 20u) {
+                // Volatile performance macro: neutral after every startup and
+                // deliberately excluded from persistent editor settings.
+                intensityValue = value;
+            } else if (controller == 64u) {
+                setSustainPedal(value >= 64u);
+            } else if (controller == 121u) {
+                intensityValue = 0;
+                setSustainPedal(false);
+            } else if (controller == 123u) {
+                allNotesOff();
+            }
         }
     }
 
@@ -323,6 +345,11 @@ public:
         return cutoffCc1SerialValue;
     }
 
+    uint8_t intensity() const
+    {
+        return intensityValue;
+    }
+
     int32_t pitchBendUnits() const
     {
         // Use the conventional fixed bend range of two semitones. Pitch units
@@ -339,8 +366,11 @@ public:
 
     void allNotesOff()
     {
-        for (uint32_t i = 0; i < 128; ++i)
+        for (uint32_t i = 0; i < 128; ++i) {
             heldNotes[i] = false;
+            keyDown[i] = false;
+        }
+        sustainPedal = false;
         gate = false;
         legatoSlide = false;
     }
@@ -356,7 +386,6 @@ public:
             cutoffCc1Active = false;
             ++cutoffCc1SerialValue;
         }
-        pitchBend = 0;
         ++disconnectSerialValue;
     }
 
@@ -405,7 +434,8 @@ public:
 
     // Web editor settings. The SysEx payload keeps these in a stable order:
     // scale, accent, span, tempo LSB/MSB, root, gate, glide, channel,
-    // MIDI sync, base octave, waveform, distortion, drive, tone, and poles.
+    // MIDI sync, base octave, waveform, distortion, drive, tone, poles,
+    // acidness, and swing.
     uint8_t scale = 0;
     uint8_t accentProbability = 32;
     uint8_t octaveSpan = 2;
@@ -421,6 +451,7 @@ public:
     uint8_t distortionTone = 50;
     uint8_t filterPoles = 4;
     uint8_t acidness = 50;
+    uint8_t swing = 0;
     bool patternEnabled = false;
     uint8_t patternLength = 16;
     uint8_t patternInitialStep = 0;
@@ -469,6 +500,7 @@ public:
         distortionTone = state.distortionTone;
         filterPoles = state.filterPoles;
         acidness = state.acidness;
+        swing = state.swing <= 100 ? state.swing : 0;
         patternEnabled = state.patternEnabled != 0;
         activePatternSlot =
             state.activeSlot < PatternSlotCount ? state.activeSlot : 0;
@@ -516,26 +548,8 @@ public:
     }
 
 private:
-    void noteOn(uint8_t nextNote, uint8_t nextVelocity)
+    void selectNewestHeldNote()
     {
-        bool hadHeldNote = gate;
-        heldNotes[nextNote] = true;
-        heldOrder[nextNote] = ++noteOrder;
-        heldVelocity[nextNote] = nextVelocity;
-        note = nextNote;
-        velocity = nextVelocity;
-        gate = true;
-        legatoSlide = hadHeldNote;
-        if (!hadHeldNote)
-            ++articulationSerial;
-    }
-
-    void noteOff(uint8_t releasedNote)
-    {
-        heldNotes[releasedNote] = false;
-        if (releasedNote != note)
-            return;
-
         bool found = false;
         uint32_t newestOrder = 0;
         uint8_t newestNote = note;
@@ -557,6 +571,48 @@ private:
         velocity = heldVelocity[newestNote];
         gate = true;
         legatoSlide = true;
+    }
+
+    void setSustainPedal(bool enabled)
+    {
+        if (enabled == sustainPedal)
+            return;
+        sustainPedal = enabled;
+        if (enabled)
+            return;
+
+        for (uint32_t i = 0; i < 128; ++i) {
+            if (!keyDown[i])
+                heldNotes[i] = false;
+        }
+        if (!heldNotes[note])
+            selectNewestHeldNote();
+    }
+
+    void noteOn(uint8_t nextNote, uint8_t nextVelocity)
+    {
+        bool hadHeldNote = gate;
+        keyDown[nextNote] = true;
+        heldNotes[nextNote] = true;
+        heldOrder[nextNote] = ++noteOrder;
+        heldVelocity[nextNote] = nextVelocity;
+        note = nextNote;
+        velocity = nextVelocity;
+        gate = true;
+        legatoSlide = hadHeldNote;
+        if (!hadHeldNote)
+            ++articulationSerial;
+    }
+
+    void noteOff(uint8_t releasedNote)
+    {
+        keyDown[releasedNote] = false;
+        if (sustainPedal)
+            return;
+        heldNotes[releasedNote] = false;
+        if (releasedNote != note)
+            return;
+        selectNewestHeldNote();
     }
 
     void applySysex()
@@ -587,7 +643,8 @@ private:
         if (sysex[5] != 0x01u ||
             (sysexLength != 17 && sysexLength != 19 &&
                 sysexLength != 20 && sysexLength != 21 &&
-                sysexLength != 22 && sysexLength != 23))
+                sysexLength != 22 && sysexLength != 23 &&
+                sysexLength != 24))
             return;
 
         scale = sysex[6] > 5 ? 0 : sysex[6];
@@ -626,10 +683,13 @@ private:
             filterPoles = sysex[21] == 3 ? 3 : 4;
         if (sysexLength >= 23)
             acidness = sysex[22] > 100 ? 100 : sysex[22];
+        if (sysexLength >= 24)
+            swing = sysex[23] > 100 ? 100 : sysex[23];
         if (!midiClockSync) {
             midiClockRunning = false;
             midiClockTicks = 0;
             pendingMidiSteps = 0;
+            midiClockLongStep = true;
         }
         persistenceRequested = true;
     }
@@ -651,7 +711,7 @@ private:
         patternLength = clamp32(sysex[7], 1, 16);
         for (uint32_t step = 0; step < 16; ++step) {
             uint32_t offset = 8 + step * 5;
-            patternNote[step] = clamp32(sysex[offset], 0, 11);
+            patternNote[step] = clamp32(sysex[offset], 0, 12);
             patternOctave[step] = clamp32(sysex[offset + 1], 0, 3);
             patternAccent[step] = sysex[offset + 2] != 0;
             patternGate[step] =
@@ -697,7 +757,7 @@ private:
         patternReverse = slot.playbackMode == 1;
         patternPendulum = slot.playbackMode == 2;
         for (uint32_t i = 0; i < 16; ++i) {
-            patternNote[i] = clamp32(slot.note[i], 0, 11);
+            patternNote[i] = clamp32(slot.note[i], 0, 12);
             patternOctave[i] = clamp32(slot.octave[i], 0, 3);
             patternAccent[i] = slot.accent[i] != 0;
             patternGate[i] = clamp32(slot.gate[i], 10, 95);
@@ -769,6 +829,7 @@ private:
         state.distortionTone = distortionTone;
         state.filterPoles = filterPoles;
         state.acidness = acidness;
+        state.swing = swing;
         state.patternEnabled = patternEnabled;
         state.activeSlot = activePatternSlot;
         for (uint32_t i = 0; i < PatternSlotCount; ++i)
@@ -799,8 +860,10 @@ private:
     uint8_t sysexLength = 0;
     bool midiClockRunning = false;
     uint8_t midiClockTicks = 0;
+    bool midiClockLongStep = true;
     uint8_t pendingMidiSteps = 0;
     bool heldNotes[128] = {};
+    bool keyDown[128] = {};
     uint8_t heldVelocity[128] = {};
     uint32_t heldOrder[128] = {};
     uint32_t noteOrder = 0;
@@ -813,6 +876,8 @@ private:
     uint8_t cutoffCc1Value = 0;
     uint32_t cutoffCc1SerialValue = 0;
     int32_t pitchBend = 0;
+    bool sustainPedal = false;
+    uint8_t intensityValue = 0;
     PatternSlot patternSlots[PatternSlotCount] = {};
     bool persistenceRequested = false;
 };
@@ -1440,6 +1505,7 @@ void controlWorker()
     uint32_t lastPulse2Edges = 0;
     uint16_t patternIndicatorTick = 0;
     uint64_t nextInternalStep = time_us_64();
+    bool internalClockLongStep = true;
     uint64_t lastExternalClockTime = 0;
     uint64_t lastSequencerStepTime = 0;
     uint64_t sequencerStepPeriod = 250000;
@@ -1562,6 +1628,10 @@ void controlWorker()
             parameters.cutoffQ15 =
                 clamp32(parameters.cutoffQ15, 120, 32200);
         }
+        int32_t intensity = midi.intensity();
+        parameters.cutoffQ15 = clamp32(
+            parameters.cutoffQ15 + (intensity * 2400) / 127,
+            120, 32200);
 
         // Resonance uses a squared curve: most of X stays smooth and useful,
         // while the upper range now crosses the diode ladder's oscillation
@@ -1571,6 +1641,10 @@ void controlWorker()
         parameters.resonanceQ12 =
             (int32_t)(((int64_t)xKnob * xKnob *
                 resonanceMaximum) >> 24);
+        parameters.resonanceQ12 = clamp32(
+            parameters.resonanceQ12 +
+                (intensity * resonanceMaximum) / (127 * 10),
+            0, resonanceMaximum);
 
         // One musically coupled control: clockwise gives a longer envelope and
         // more glide. Coefficients are calculated here, never in the ISR.
@@ -1586,13 +1660,17 @@ void controlWorker()
 
         // X still adds some envelope sweep, but no longer stacks an extreme
         // sweep on top of maximum resonance.
-        parameters.filterEnvelopeQ15 = 11000 + (xKnob * 3000) / 4095;
+        parameters.filterEnvelopeQ15 = clamp32(
+            11000 + (xKnob * 3000) / 4095 +
+                (intensity * 6000) / 127,
+            0, 32767);
         parameters.waveform = midi.waveform;
         parameters.filterPoles = midi.filterPoles;
         parameters.distortion =
             midi.distortionAmount == 0 ? 0 : midi.distortion;
         parameters.distortionGainQ8 =
-            256 + (int32_t)midi.distortionAmount * 1024 / 100;
+            256 + (int32_t)midi.distortionAmount * 1024 / 100 +
+            (midi.distortion == 0 ? 0 : (intensity * 384) / 127);
         parameters.distortionRail =
             2047 - (int32_t)midi.distortionAmount * 511 / 100;
         parameters.distortionKnee =
@@ -1647,6 +1725,11 @@ void controlWorker()
 
             uint32_t bpm = clamp32(midi.tempo, 30, 240);
             uint64_t stepPeriod = 60000000ull / ((uint64_t)bpm * 2ull);
+            uint64_t swingOffset =
+                (stepPeriod * clamp32(midi.swing, 0, 100)) / 300u;
+            uint64_t internalStepPeriod = internalClockLongStep
+                ? stepPeriod + swingOffset
+                : stepPeriod - swingOffset;
             bool externalClockActive =
                 lastExternalClockTime != 0 &&
                 now - lastExternalClockTime < 2000000ull;
@@ -1656,11 +1739,17 @@ void controlWorker()
             bool midiClockControls = midi.clockControlsSequencer();
             bool internalClock = !externalClockActive && !midiClockControls &&
                 now >= nextInternalStep;
-            if (internalClock)
-                nextInternalStep = now + stepPeriod;
+            if (internalClock) {
+                nextInternalStep = now + internalStepPeriod;
+                internalClockLongStep = !internalClockLongStep;
+            }
 
             if (externalClock || midiClockStep || internalClock) {
-                if (lastSequencerStepTime != 0) {
+                if (internalClock) {
+                    // Gate percentages follow the duration of the current
+                    // swung step, keeping short and long notes proportional.
+                    sequencerStepPeriod = internalStepPeriod;
+                } else if (lastSequencerStepTime != 0) {
                     uint64_t measured = now - lastSequencerStepTime;
                     if (measured >= 10000ull && measured <= 2000000ull)
                         sequencerStepPeriod = measured;
@@ -1691,32 +1780,45 @@ void controlWorker()
                             : (uint8_t)(
                                 (initialStep + logicalStep) % length);
                     }
-                    bool legatoTransition =
-                        patternStarted && queuedLegato && sequenceGate;
-                    uint8_t previousNote = sequenceNote;
-                    int32_t programmedNote =
-                        (int32_t)midi.baseMidiNote +
-                        midi.rootNote +
-                        midi.patternNote[currentStep] +
-                        (int32_t)midi.patternOctave[currentStep] * 12;
-                    sequenceNote =
-                        (uint8_t)clamp32(programmedNote, 0, 127);
-                    sequenceAccent =
-                        midi.patternAccent[currentStep] != 0;
-                    sequenceGlide =
-                        legatoTransition &&
-                        sequenceNote != previousNote;
-                    if (!legatoTransition)
-                        ++sequenceTrigger;
-                    sequenceGate = true;
-                    gateOffTime = now +
-                        (sequencerStepPeriod *
-                            midi.patternGate[currentStep]) / 100u;
-                    // Tie belongs to the current step and carries its gate
-                    // into the following step. A pitch change becomes a slide;
-                    // an unchanged pitch becomes a true repeated-note tie.
-                    queuedLegato =
-                        midi.patternTie[currentStep] != 0;
+                    bool mutedStep =
+                        midi.patternNote[currentStep] == 12u;
+                    if (mutedStep) {
+                        // A muted note is an explicit rest. It also breaks a
+                        // preceding tie so the previous voice stops exactly at
+                        // this step boundary.
+                        sequenceGate = false;
+                        sequenceAccent = false;
+                        sequenceGlide = false;
+                        queuedLegato = false;
+                        gateOffTime = now;
+                    } else {
+                        bool legatoTransition =
+                            patternStarted && queuedLegato && sequenceGate;
+                        uint8_t previousNote = sequenceNote;
+                        int32_t programmedNote =
+                            (int32_t)midi.baseMidiNote +
+                            midi.rootNote +
+                            midi.patternNote[currentStep] +
+                            (int32_t)midi.patternOctave[currentStep] * 12;
+                        sequenceNote =
+                            (uint8_t)clamp32(programmedNote, 0, 127);
+                        sequenceAccent =
+                            midi.patternAccent[currentStep] != 0;
+                        sequenceGlide =
+                            legatoTransition &&
+                            sequenceNote != previousNote;
+                        if (!legatoTransition)
+                            ++sequenceTrigger;
+                        sequenceGate = true;
+                        gateOffTime = now +
+                            (sequencerStepPeriod *
+                                midi.patternGate[currentStep]) / 100u;
+                        // Tie belongs to the current step and carries its gate
+                        // into the following step. A pitch change becomes a
+                        // slide; an unchanged pitch becomes a true tie.
+                        queuedLegato =
+                            midi.patternTie[currentStep] != 0;
+                    }
                     if (midi.patternPendulum && length > 1) {
                         if (!pendulumReverseDirection) {
                             if (logicalStep + 1u >= length) {
