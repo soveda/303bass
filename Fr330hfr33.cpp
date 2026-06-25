@@ -218,6 +218,9 @@ uint32_t midiNoteToPhaseIncrement(uint8_t note)
 
 class MidiParser {
 public:
+    static constexpr uint8_t ConfigPayloadLength = 24;
+    static constexpr uint8_t PatternPayloadLength = 92;
+
     void process(uint8_t byte)
     {
         if (byte == 0xF8u) {
@@ -516,6 +519,42 @@ public:
         return requested;
     }
 
+    bool takePatternDumpRequest()
+    {
+        bool requested = patternDumpRequested;
+        patternDumpRequested = false;
+        return requested;
+    }
+
+    uint32_t fillPatternSysex(uint8_t* bytes) const
+    {
+        if (!bytes)
+            return 0;
+        bytes[0] = 0xF0u;
+        bytes[1] = 0x7Du;
+        bytes[2] = 'F';
+        bytes[3] = '3';
+        bytes[4] = '0';
+        bytes[5] = '3';
+        bytes[6] = 0x02u;
+        bytes[7] = patternEnabled ? 1u : 0u;
+        bytes[8] = patternLength;
+        for (uint32_t step = 0; step < 16; ++step) {
+            uint32_t offset = 9 + step * 5;
+            bytes[offset] = patternNote[step];
+            bytes[offset + 1] = patternOctave[step];
+            bytes[offset + 2] = patternAccent[step] ? 1u : 0u;
+            bytes[offset + 3] = patternGate[step];
+            bytes[offset + 4] = patternTie[step] ? 1u : 0u;
+        }
+        bytes[89] = patternInitialStep;
+        bytes[90] = patternReverse ? 1u : 0u;
+        bytes[91] = patternPendulum ? 1u : 0u;
+        bytes[92] = activePatternSlot;
+        bytes[93] = 0xF7u;
+        return 94;
+    }
+
     void savePersistentStateIfChanged()
     {
         PersistentState state = currentPersistentState();
@@ -631,8 +670,10 @@ private:
             return;
         }
         if (sysex[5] == 0x03u) {
-            if (sysexLength == 7)
+            if (sysexLength == 7) {
                 loadPatternSlot(sysex[6], true);
+                patternDumpRequested = true;
+            }
             return;
         }
         if (sysex[5] == 0x04u) {
@@ -880,6 +921,7 @@ private:
     uint8_t intensityValue = 0;
     PatternSlot patternSlots[PatternSlotCount] = {};
     bool persistenceRequested = false;
+    bool patternDumpRequested = false;
 };
 
 MidiParser midi;
@@ -1559,6 +1601,13 @@ void controlWorker()
         }
         if (midi.takePersistenceRequest())
             midi.savePersistentStateIfChanged();
+        if (!hostMode && tud_mounted() && !tud_suspended() &&
+            midi.takePatternDumpRequest()) {
+            uint8_t bytes[94];
+            uint32_t count = midi.fillPatternSysex(bytes);
+            if (count != 0)
+                tud_midi_stream_write(0, bytes, count);
+        }
 
         readSnapshot(hardwareShared, hardware);
         PlayMode mode = hardware.switchPosition == (uint8_t)ComputerCard::Switch::Up

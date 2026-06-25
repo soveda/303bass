@@ -239,6 +239,7 @@
 </main>
 <script>
 let outputPort = null;
+let inputPort = null;
 const $ = id => document.getElementById(id);
 const showPage = page => {
   document.body.dataset.page = page;
@@ -294,6 +295,44 @@ for (let step = 0; step < 16; step++) {
 }
 
 const lane = className => [...document.querySelectorAll(`.${className}`)];
+const savePatternUiSnapshot = slot => {
+  localStorage.setItem(slotKey(slot), JSON.stringify(currentPatternUi()));
+};
+const handlePatternSysex = data => {
+  if (data.length < 94 ||
+      data[0] !== 0xF0 || data[1] !== 0x7D ||
+      data[2] !== 0x46 || data[3] !== 0x33 ||
+      data[4] !== 0x30 || data[5] !== 0x33 ||
+      data[6] !== 0x02 || data[data.length - 1] !== 0xF7)
+    return false;
+
+  const slot = Math.max(0, Math.min(3, Number(data[92]) || 0));
+  $("patternEnabled").checked = data[7] !== 0;
+  $("patternLength").value = Math.max(1, Math.min(16, Number(data[8]) || 16));
+  $("patternInitialStep").value = Math.max(1,
+    Math.min(16, (Number(data[89]) || 0) + 1));
+  $("patternReverse").checked = data[90] !== 0;
+  $("patternPendulum").checked = data[91] !== 0;
+  $("patternSlot").value = String(slot);
+
+  lane("step-note").forEach((control, i) =>
+    control.value = Math.max(0, Math.min(12, Number(data[9 + i * 5]) || 0)));
+  lane("step-octave").forEach((control, i) =>
+    control.value = Math.max(0, Math.min(3, Number(data[10 + i * 5]) || 0)));
+  lane("step-accent").forEach((control, i) =>
+    control.checked = data[11 + i * 5] !== 0);
+  lane("step-gate").forEach((control, i) =>
+    control.value = nearestGate(Number(data[12 + i * 5]) || defaultGates[i]));
+  lane("step-tie").forEach((control, i) =>
+    control.checked = data[13 + i * 5] !== 0);
+
+  savePatternUiSnapshot(slot);
+  $("status").textContent = `Loaded pattern slot ${slot + 1} from card.`;
+  return true;
+};
+const handleMidiMessage = event => {
+  handlePatternSysex([...event.data]);
+};
 const randomInt = maximum => Math.floor(Math.random() * maximum);
 $("randomNotes").addEventListener("click", () => {
   const selectedScale = scaleNotes[Number($("scale").value)] || scaleNotes[0];
@@ -442,9 +481,15 @@ $("connect").addEventListener("click", async () => {
   try {
     const access = await navigator.requestMIDIAccess({sysex: true});
     const outputs = [...access.outputs.values()];
+    const inputs = [...access.inputs.values()];
     outputPort = outputs.find(p => /Fr330hfr33/i.test(p.name)) || outputs[0];
+    if (inputPort)
+      inputPort.onmidimessage = null;
+    inputPort = inputs.find(p => /Fr330hfr33/i.test(p.name)) || inputs[0] || null;
+    if (inputPort)
+      inputPort.onmidimessage = handleMidiMessage;
     $("status").textContent = outputPort
-      ? `Connected to ${outputPort.name}.`
+      ? `Connected to ${outputPort.name}${inputPort ? " and listening for slot updates." : "."}`
       : "No MIDI output found. Check the cable and reset the card.";
   } catch (error) {
     $("status").textContent = `Connection failed: ${error.message}`;
@@ -457,13 +502,12 @@ $("loadSlot").addEventListener("click", () => {
     return;
   }
   const slot = Number($("patternSlot").value);
-  const stored = localStorage.getItem(slotKey(slot));
-  if (stored)
-    restorePatternUi(JSON.parse(stored));
   outputPort.send([
     0xF0, 0x7D, 0x46, 0x33, 0x30, 0x33, 0x03, slot, 0xF7
   ]);
-  $("status").textContent = `Loaded pattern slot ${slot + 1}.`;
+  $("status").textContent = inputPort
+    ? `Loading pattern slot ${slot + 1} from card...`
+    : `Loaded pattern slot ${slot + 1}. Reconnect if the page does not update.`;
 });
 
 $("saveSlot").addEventListener("click", () => {
@@ -472,8 +516,7 @@ $("saveSlot").addEventListener("click", () => {
     return;
   }
   const slot = Number($("patternSlot").value);
-  localStorage.setItem(slotKey(slot),
-    JSON.stringify(currentPatternUi()));
+  savePatternUiSnapshot(slot);
   $("apply").click();
   outputPort.send([
     0xF0, 0x7D, 0x46, 0x33, 0x30, 0x33, 0x04, slot, 0xF7

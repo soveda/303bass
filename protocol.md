@@ -160,8 +160,10 @@ F0 7D 46 33 30 33 03 slot F7   recall slot
 F0 7D 46 33 30 33 04 slot F7   save current pattern to slot
 ```
 
-Slot is `0–3`. Recall changes the running pattern immediately. Save copies the
-current lane data and playback settings into the selected card-flash slot.
+Slot is `0–3`. Recall changes the running pattern immediately and echoes the
+loaded pattern back over Command `02`, allowing the Web editor to redraw from
+the card state. Save copies the current lane data and playback settings into
+the selected card-flash slot.
 Global command-01 settings are also persistent and restore automatically at
 boot.
 

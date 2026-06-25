@@ -7,10 +7,10 @@ diode-style filter, accent, glide, distortion, USB MIDI, and a persistent
 
 ## Current release
 
-Version `0.9.2`:
+Version `0.9.3`:
 
 ```text
-uf2/Fr330hfr33-v0.9.2.uf2
+uf2/Fr330hfr33-v0.9.3.uf2
 ```
 
 SHA-256:
@@ -23,7 +23,7 @@ The release has passed functional, USB disconnect/reconnect, persistence,
 extended-running, processor-stress, Swing, pitch-bend, sequencer-rest,
 sustain-pedal, Intensity, and editor workflow hardware tests.
 
-### New in 0.9.2
+### New in 0.9.3
 
 - Internal and MIDI-clock Swing with a `1.00:1`–`2.00:1` ratio display
 - Standard ±2-semitone MIDI pitch bend

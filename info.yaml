@@ -1,6 +1,6 @@
 id: Fr330hfr33
 title: Fr330hfr33
-release: 0.9.2
+release: 0.9.3
 summary: Performance-focused acid voice with diode filtering, distortion, MIDI, and a persistent sequencer
 description: Hardware-tested acid bass synthesiser with selectable saw or square oscillator, switchable 18 or 24 dB diode-style filtering, accent and glide, distortion, USB MIDI device/host operation, and a persistent editable sequencer.
 panel:
@@ -150,7 +150,7 @@ notes:
   - "Standard 14-bit MIDI pitch bend provides a fixed plus or minus two-semitone range and is reflected by both the audio voice and calibrated pitch CV output."
   - "In CV/MIDI mode, Pulse In 2 high enables manual glide. MIDI note overlaps also create automatic legato glide while keeping the gate and envelope open."
   - "The firmware runs the RP2040 at 192 MHz, copies the complete binary to RAM, and keeps division, locks, waits, USB work, and software 64-bit multiplication out of the audio callback."
-  - "Version 0.9.2 passed functional, disconnect/reconnect, persistence, long-running, processor-stress, Swing, pitch-bend, sequencer-rest, sustain-pedal, Intensity, and editor workflow hardware testing."
+  - "Version 0.9.3 passed functional, disconnect/reconnect, persistence, long-running, processor-stress, Swing, pitch-bend, sequencer-rest, sustain-pedal, Intensity, editor workflow, and slot-recall UI-sync hardware testing."
 source:
   - Fr330hfr33.cpp
   - Fr330hfr33_LUT.cpp
@@ -193,6 +193,6 @@ source_file: data/cards/Fr330hfr33.yml
 metadata:
   creator: Adrian Vos
   language: Pico SDK
-  version: 0.9.2
+  version: 0.9.3
   status: Stable
   editor_url: web_config/Fr330hfr33.html
