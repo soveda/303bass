@@ -171,6 +171,13 @@ Use Chrome or Edge with Web MIDI and SysEx enabled. Connect with a USB-C data
 cable, close other applications using the MIDI port, select **Fr330hfr33**, and
 press **Apply**.
 
+The editor requires HTTPS (or localhost). iOS and Safari are unsupported;
+Android MIDI support depends on the device, OTG adapter, and hub. The editor
+remembers its current page, colour theme, and local pattern snapshots. Settings
+reach the card only after **Apply** or **Save slot** succeeds. Open **Developer
+diagnostics** after a connection failure to inspect detected ports and recent
+send errors without cluttering normal use.
+
 To serve the editor locally:
 
 ```sh
